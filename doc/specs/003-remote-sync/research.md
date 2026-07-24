@@ -1,4 +1,9 @@
-# 同步设计
+# Research: 远端同步
+
+Markbook 同步整个 `Markbook/` 目录，而不是单独同步数据库记录。这样
+Markdown、图片和其他附件始终可以被普通文件工具读取与备份。
+
+## 已确定方向
 
 Markbook 同步整个 `Markbook/` 目录，而不是单独同步数据库记录。这样
 Markdown、图片和其他附件始终可以被普通文件工具读取与备份。
@@ -35,3 +40,10 @@ NAS 首选 WebDAV over HTTPS。远端版本使用 `ETag`，目录枚举使用
 
 首版只支持用户主动同步。加入后台任务前，需要具备网络约束、退避重试、
 前台状态提示和可取消操作。首次启用任何远端时明确说明哪些文件会离开设备。
+
+## 待验证
+
+- HarmonyOS 上适合 Microsoft Entra PKCE 的系统浏览器回调方案。
+- Network Kit 对 WebDAV `PROPFIND`、`MOVE` 和大文件流式传输的支持边界。
+- 主流 NAS（群晖、威联通及通用 WebDAV）的 ETag 与锁行为差异。
+- OneDrive Personal 与 Business 在 App Folder、delta 和上传会话上的差异。

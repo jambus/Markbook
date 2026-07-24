@@ -4,6 +4,9 @@ Markbook 是一个面向 HarmonyOS 的本地优先 Markdown 笔记本。笔记�
 `.md` 文件保存，拍摄的图片会立即复制到同一笔记本的 `attachments/`
 目录，并以相对路径插入正文。
 
+产品规格、技术计划和任务清单统一维护在 [`doc/`](doc/README.md)，按
+Spec Kit 的规格驱动流程推进。
+
 ## 当前能力
 
 - 创建、浏览和编辑本地 Markdown 笔记。

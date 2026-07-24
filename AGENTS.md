@@ -11,6 +11,8 @@ filesystem or sync logic in `services/`. Resources are grouped under
 
 Keep Markdown files and image attachments as the source of truth. Do not add a
 database dependency for data that can be derived from the notebook directory.
+Product requirements and implementation work are driven by numbered specs in
+`doc/specs/`; update `spec.md`, `plan.md`, and `tasks.md` before changing scope.
 
 ## Build, Test, and Development Commands
 
