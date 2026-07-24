@@ -4,7 +4,7 @@
 
 - [x] T001 建立 `Note` 与 `MarkdownDocument` 模型。
 - [x] T002 建立应用沙箱笔记目录和基础读写仓储。
-- [ ] T003 在 `NotebookRepository` 实现临时文件原子替换。
+- [x] T003 在 `NotebookRepository` 实现临时文件原子替换。
 - [ ] T004 [P] 添加空标题、重名和 Unicode 单测。
 - [ ] T005 添加异常写入恢复测试。
 
@@ -25,4 +25,3 @@
 
 - [ ] T013 在手机和平板验证创建、编辑、重启和恢复。
 - [ ] T014 运行 Hypium 全量测试和 HAP 构建。
-

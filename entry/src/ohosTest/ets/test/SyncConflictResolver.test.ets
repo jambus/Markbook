@@ -19,5 +19,10 @@ export default function syncConflictResolverTest(): void {
       const path = SyncConflictResolver.conflictPath('notes/trip.md', 'Mate60', 42);
       expect(path).assertEqual('notes/trip (冲突-Mate60-42).md');
     });
+
+    it('sanitizes device names in conflict paths', 0, () => {
+      const path = SyncConflictResolver.conflictPath('notes/a.md', 'phone/one', 1);
+      expect(path).assertEqual('notes/a (冲突-phone_one-1).md');
+    });
   });
 }

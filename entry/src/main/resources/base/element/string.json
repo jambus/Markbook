@@ -11,7 +11,10 @@
     {
       "name": "EntryAbility_label",
       "value": "Markbook"
+    },
+    {
+      "name": "onedrive_client_id",
+      "value": "REPLACE_WITH_ENTRA_CLIENT_ID"
     }
   ]
 }
-
