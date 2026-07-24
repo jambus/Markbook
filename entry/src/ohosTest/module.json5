@@ -1,0 +1,15 @@
+{
+  "module": {
+    "name": "entry_test",
+    "type": "feature",
+    "description": "Markbook unit tests",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false
+  }
+}
+

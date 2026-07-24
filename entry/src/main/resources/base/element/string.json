@@ -1,0 +1,17 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "本地优先的 Markdown 笔记本"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Markbook 主界面"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Markbook"
+    }
+  ]
+}
+

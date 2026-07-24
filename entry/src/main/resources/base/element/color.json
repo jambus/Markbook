@@ -1,0 +1,37 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#F7F7F2"
+    },
+    {
+      "name": "page_background",
+      "value": "#F7F7F2"
+    },
+    {
+      "name": "surface",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "ink",
+      "value": "#18201C"
+    },
+    {
+      "name": "muted",
+      "value": "#66716B"
+    },
+    {
+      "name": "brand",
+      "value": "#2F6B4F"
+    },
+    {
+      "name": "accent",
+      "value": "#D8573C"
+    },
+    {
+      "name": "line",
+      "value": "#DDE2DE"
+    }
+  ]
+}
+

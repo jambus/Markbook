@@ -1,0 +1,14 @@
+{
+  "modelVersion": "5.0.2",
+  "name": "markbook",
+  "version": "1.0.0",
+  "description": "A local-first Markdown notebook for HarmonyOS",
+  "main": "",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.19"
+  }
+}
+
