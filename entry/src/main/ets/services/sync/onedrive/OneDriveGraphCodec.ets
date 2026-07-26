@@ -23,8 +23,8 @@ interface GraphUploadSessionJson {
 
 interface GraphDeltaPageJson {
   value?: Array<GraphDriveItemJson>;
-  '@odata.nextLink'?: string;
-  '@odata.deltaLink'?: string;
+  nextLink?: string;
+  deltaLink?: string;
 }
 
 export class OneDriveRootInfo {
@@ -91,7 +91,10 @@ export class OneDriveGraphCodec {
     baselineFiles: Array<FileSnapshot>,
     knownFolders: Array<ProviderFolderSnapshot> = []
   ): OneDriveDeltaPage {
-    const page = JSON.parse(content) as GraphDeltaPageJson;
+    const normalizedContent = content
+      .replace(/"@odata\.nextLink"\s*:/g, '"nextLink":')
+      .replace(/"@odata\.deltaLink"\s*:/g, '"deltaLink":');
+    const page = JSON.parse(normalizedContent) as GraphDeltaPageJson;
     if (!Array.isArray(page.value)) {
       throw new Error('OneDrive delta response has no value array');
     }
@@ -159,20 +162,20 @@ export class OneDriveGraphCodec {
       ));
     });
 
-    if (typeof page['@odata.nextLink'] === 'string') {
+    if (typeof page.nextLink === 'string') {
       return new OneDriveDeltaPage(
         changes,
-        page['@odata.nextLink'],
+        page.nextLink,
         true,
         folders
       );
     }
-    if (typeof page['@odata.deltaLink'] !== 'string') {
+    if (typeof page.deltaLink !== 'string') {
       throw new Error('OneDrive delta response has no continuation cursor');
     }
     return new OneDriveDeltaPage(
       changes,
-      page['@odata.deltaLink'],
+      page.deltaLink,
       false,
       folders
     );

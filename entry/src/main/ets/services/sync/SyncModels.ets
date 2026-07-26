@@ -110,3 +110,32 @@ export class SyncPlan {
     this.operations = operations;
   }
 }
+
+export enum SyncPhase {
+  SCANNING_LOCAL = 'scanning-local',
+  READING_REMOTE = 'reading-remote',
+  APPLYING = 'applying',
+  VERIFYING = 'verifying',
+  COMPLETED = 'completed'
+}
+
+export class SyncProgress {
+  phase: SyncPhase;
+  completedOperations: number;
+  totalOperations: number;
+  currentPath?: string;
+
+  constructor(
+    phase: SyncPhase,
+    completedOperations: number,
+    totalOperations: number,
+    currentPath?: string
+  ) {
+    this.phase = phase;
+    this.completedOperations = completedOperations;
+    this.totalOperations = totalOperations;
+    this.currentPath = currentPath;
+  }
+}
+
+export type SyncProgressListener = (progress: SyncProgress) => void;

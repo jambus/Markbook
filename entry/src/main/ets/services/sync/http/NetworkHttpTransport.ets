@@ -8,7 +8,7 @@ import {
 } from './HttpTransport';
 import type { HttpTransport } from './HttpTransport';
 
-class NetworkHeaders {
+interface NetworkHeaders {
   Authorization?: string;
   Accept?: string;
   'Content-Type'?: string;
@@ -17,6 +17,13 @@ class NetworkHeaders {
   'If-Match'?: string;
   'If-None-Match'?: string;
   Range?: string;
+  'x-amz-content-sha256'?: string;
+  'x-amz-date'?: string;
+  'x-amz-security-token'?: string;
+}
+
+class NetworkResponseHeaders {
+  ETag?: string;
 }
 
 export class NetworkHttpTransport implements HttpTransport {
@@ -42,15 +49,22 @@ export class NetworkHttpTransport implements HttpTransport {
       }
 
       const response = await task.request(request.url, options);
+      const responseHeaders = this.responseHeaders(response.header);
       if (request.responseType === HttpResponseType.BINARY) {
         const buffer = response.result as ArrayBuffer;
         return new HttpResponseData(
           response.responseCode,
           undefined,
-          new Uint8Array(buffer)
+          new Uint8Array(buffer),
+          responseHeaders.ETag
         );
       }
-      return new HttpResponseData(response.responseCode, response.result as string);
+      return new HttpResponseData(
+        response.responseCode,
+        response.result as string,
+        undefined,
+        responseHeaders.ETag
+      );
     } finally {
       const index = this.active.indexOf(task);
       if (index >= 0) {
@@ -72,6 +86,9 @@ export class NetworkHttpTransport implements HttpTransport {
     if (method === HttpMethod.POST) {
       return http.RequestMethod.POST;
     }
+    if (method === HttpMethod.HEAD) {
+      return http.RequestMethod.HEAD;
+    }
     if (method === HttpMethod.PUT) {
       return http.RequestMethod.PUT;
     }
@@ -79,31 +96,24 @@ export class NetworkHttpTransport implements HttpTransport {
   }
 
   private headers(headers: HttpHeaders): NetworkHeaders {
-    const result = new NetworkHeaders();
-    if (headers.authorization !== undefined) {
-      result.Authorization = headers.authorization;
-    }
-    if (headers.accept !== undefined) {
-      result.Accept = headers.accept;
-    }
-    if (headers.contentType !== undefined) {
-      result['Content-Type'] = headers.contentType;
-    }
-    if (headers.contentLength !== undefined) {
-      result['Content-Length'] = headers.contentLength;
-    }
-    if (headers.contentRange !== undefined) {
-      result['Content-Range'] = headers.contentRange;
-    }
-    if (headers.ifMatch !== undefined) {
-      result['If-Match'] = headers.ifMatch;
-    }
-    if (headers.ifNoneMatch !== undefined) {
-      result['If-None-Match'] = headers.ifNoneMatch;
-    }
-    if (headers.range !== undefined) {
-      result.Range = headers.range;
-    }
-    return result;
+    return {
+      Authorization: headers.authorization,
+      Accept: headers.accept,
+      'Content-Type': headers.contentType,
+      'Content-Length': headers.contentLength,
+      'Content-Range': headers.contentRange,
+      'If-Match': headers.ifMatch,
+      'If-None-Match': headers.ifNoneMatch,
+      Range: headers.range,
+      'x-amz-content-sha256': headers.xAmzContentSha256,
+      'x-amz-date': headers.xAmzDate,
+      'x-amz-security-token': headers.xAmzSecurityToken
+    };
+  }
+
+  private responseHeaders(headers: Object): NetworkResponseHeaders {
+    const normalized = JSON.stringify(headers)
+      .replace(/"etag"\s*:/gi, '"ETag":');
+    return JSON.parse(normalized) as NetworkResponseHeaders;
   }
 }

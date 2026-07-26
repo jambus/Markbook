@@ -2,8 +2,8 @@
 
 ## Project Structure & Module Organization
 
-Markbook is a HarmonyOS Stage-model application. Global app resources and
-metadata live in `AppScope/`. The `entry/` HAP contains ArkTS code under
+Markbook is a HarmonyOS Stage-model application. App resources and metadata
+live in `AppScope/`. The `entry/` HAP contains ArkTS code under
 `entry/src/main/ets/`: UI pages are in `pages/`, data objects in `model/`, and
 filesystem or sync logic in `services/`. Resources are grouped under
 `entry/src/main/resources/base/`. Hypium tests live in
@@ -11,16 +11,19 @@ filesystem or sync logic in `services/`. Resources are grouped under
 
 Keep Markdown files and image attachments as the source of truth. Do not add a
 database dependency for data that can be derived from the notebook directory.
-Product requirements and implementation work are driven by numbered specs in
-`doc/specs/`; update `spec.md`, `plan.md`, and `tasks.md` before changing scope.
+Numbered specs live in `doc/specs/`; update `spec.md`, `plan.md`, and `tasks.md`
+before changing scope.
 
 ## Build, Test, and Development Commands
 
-Use DevEco Studio 5.0.0 Release or newer with the HarmonyOS API 12 SDK.
+Use DevEco Studio 5.0.0 Release or newer with an installed SDK at or above
+HarmonyOS 6.0.1/API 21. The app targets HarmonyOS 5/API 12 and keeps
+`compatibleSdkVersion` at HarmonyOS 4/API 10.
 
 - `ohpm install` installs project dependencies.
 - `hvigorw assembleHap` builds the entry HAP.
-- `hvigorw test` runs Hypium tests.
+- `hvigorw assembleHap -p buildMode=test -p module=entry@ohosTest` builds the
+  Hypium test HAP; install and run it on a configured device.
 
 The wrapper is supplied by DevEco Studio when the project is synchronized. Do
 not commit `.hvigor/`, `oh_modules/`, signed HAPs, or local SDK paths.
@@ -43,13 +46,15 @@ Markdown link remain valid.
 
 ## Commit & Pull Request Guidelines
 
-History currently establishes only an `Initial commit`; use short imperative
-subjects such as `Add local attachment storage`. Keep commits focused. Pull
+History uses short English subjects such as `Logic implement` and
+`Init the spec-kit structure along with doc folder`. Prefer a clear imperative
+subject such as `Add local attachment storage`, and keep commits focused. Pull
 requests must describe user-visible behavior, list build/test results, link the
 relevant issue, and include phone and tablet screenshots for UI changes.
 
 ## Security & Configuration
 
-Never commit OneDrive tokens, WebDAV passwords, personal notebooks, signing
-keys, or `local.properties`. Store credentials with HarmonyOS secure storage,
-request only required permissions, and redact remote URLs from logs.
+Never commit OneDrive tokens, S3 credentials, personal notebooks, signing keys,
+or `local.properties`. Use HarmonyOS secure storage where the compatible API
+allows it; otherwise keep credentials only in process memory. Request only
+required permissions, and redact remote URLs and secrets from logs.

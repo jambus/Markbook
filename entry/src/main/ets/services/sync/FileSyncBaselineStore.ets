@@ -45,7 +45,7 @@ export class FileSyncBaselineStore implements SyncBaselineStore {
       }
     } catch (error) {
       this.safeUnlink(tempPath);
-      throw error;
+      throw new Error('Failed to write the sync baseline');
     }
 
     this.safeUnlink(backupPath);
@@ -60,7 +60,7 @@ export class FileSyncBaselineStore implements SyncBaselineStore {
       if (!fs.accessSync(path) && fs.accessSync(backupPath)) {
         fs.renameSync(backupPath, path);
       }
-      throw error;
+      throw new Error('Failed to replace the sync baseline');
     }
   }
 

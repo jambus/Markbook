@@ -1,5 +1,6 @@
 export enum HttpMethod {
   GET = 'GET',
+  HEAD = 'HEAD',
   POST = 'POST',
   PUT = 'PUT',
   DELETE = 'DELETE'
@@ -19,6 +20,9 @@ export class HttpHeaders {
   ifMatch?: string;
   ifNoneMatch?: string;
   range?: string;
+  xAmzContentSha256?: string;
+  xAmzDate?: string;
+  xAmzSecurityToken?: string;
 }
 
 export class HttpRequestData {
@@ -47,11 +51,13 @@ export class HttpResponseData {
   status: number;
   text?: string;
   body?: Uint8Array;
+  etag?: string;
 
-  constructor(status: number, text?: string, body?: Uint8Array) {
+  constructor(status: number, text?: string, body?: Uint8Array, etag?: string) {
     this.status = status;
     this.text = text;
     this.body = body;
+    this.etag = etag;
   }
 }
 

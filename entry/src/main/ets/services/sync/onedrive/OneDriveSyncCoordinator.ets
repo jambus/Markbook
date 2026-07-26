@@ -3,11 +3,12 @@ import { NotebookRepository } from '../../NotebookRepository';
 import { FileSyncBaselineStore } from '../FileSyncBaselineStore';
 import { LocalNotebookSyncStore } from '../LocalNotebookSyncStore';
 import { SyncEngine } from '../SyncEngine';
+import type { SyncProgressListener } from '../SyncModels';
 import type { SyncResult } from '../SyncProvider';
 import { ArkTextCodec } from '../http/ArkTextCodec';
 import { NetworkHttpTransport } from '../http/NetworkHttpTransport';
-import { AssetRefreshTokenStore } from './AssetRefreshTokenStore';
 import { HarmonyOAuthCrypto } from './HarmonyOAuthCrypto';
+import { MemoryRefreshTokenStore } from './MemoryRefreshTokenStore';
 import {
   OneDriveAuthorizationTransaction,
   OneDriveOAuth,
@@ -46,7 +47,7 @@ export class OneDriveSyncCoordinator {
       this.session = new OneDriveSession(
         this.config,
         new OneDriveTokenClient(new NetworkHttpTransport(), this.codec),
-        new AssetRefreshTokenStore(this.codec)
+        new MemoryRefreshTokenStore()
       );
     }
   }
@@ -91,7 +92,7 @@ export class OneDriveSyncCoordinator {
     }
   }
 
-  async sync(): Promise<SyncResult> {
+  async sync(progressListener?: SyncProgressListener): Promise<SyncResult> {
     const accessToken = await this.requireSession().accessToken();
     const provider = new OneDriveProvider(
       new NetworkHttpTransport(),
@@ -106,7 +107,8 @@ export class OneDriveSyncCoordinator {
       ),
       new FileSyncBaselineStore(this.repository.metadataDir),
       'default',
-      'HarmonyOS'
+      'HarmonyOS',
+      progressListener
     );
   }
 

@@ -16,7 +16,8 @@ doc/
 └── specs/
     ├── 001-local-markdown-notebook/
     ├── 002-camera-attachments/
-    └── 003-remote-sync/
+    ├── 003-remote-sync/
+    └── 004-harmony-4-5-compatibility/
 ```
 
 每个编号目录代表一个可独立验收的能力域：
@@ -31,4 +32,3 @@ doc/
 
 需求变更时先更新 `spec.md`，再同步计划与任务。未完成澄清的问题统一记录在
 `product/clarifications.md`，不得在实现阶段静默假设。
-

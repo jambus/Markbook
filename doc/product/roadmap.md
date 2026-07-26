@@ -2,7 +2,8 @@
 
 ## M0 工程基线
 
-建立 HarmonyOS Stage 工程、规格体系、真机调试和持续构建入口。
+建立 HarmonyOS Stage 工程、规格体系、真机调试和持续构建入口；单一 HAP
+最低兼容 HarmonyOS 4.0（API 10），目标版本为 HarmonyOS 5.0（API 12）。
 
 ## M1 本地可用
 
@@ -16,11 +17,10 @@ Markdown 链接。覆盖取消、权限/系统异常、空间不足及孤儿附�
 
 ## M3 可控同步
 
-先交付 OneDrive 与 WebDAV over HTTPS，支持手动双向同步、增量状态、进度、
-取消、离线重试和保留双份的冲突处理。完成真实 OneDrive 与主流 NAS 验证。
+先交付 OneDrive 与 S3 兼容 NAS，支持手动双向同步、增量状态、进度、取消、
+离线重试和保留双份的冲突处理。完成真实 OneDrive、MinIO 与主流 NAS 验证。
 
 ## M4 知识工作区
 
 是否加入双向链接、标签、全文搜索、图谱和插件能力，取决于
 `clarifications.md` 中“类似 Obsidian”的产品边界确认。
-

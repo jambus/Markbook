@@ -7,7 +7,7 @@ const NOTE_EXTENSION = '.md';
 
 export class NotebookRepository {
   readonly rootDir: string;
-  private readonly notesDir: string;
+  readonly notesDir: string;
   readonly attachmentsDir: string;
   readonly metadataDir: string;
   readonly tempDir: string;

@@ -76,7 +76,7 @@ export class OneDriveSession {
         await this.refreshTokens.clear();
         throw new Error('OneDrive authorization is required');
       }
-      throw error;
+      throw new Error('OneDrive token refresh failed');
     }
     const nextRefreshToken = refreshed.refreshToken ?? storedRefreshToken;
     if (nextRefreshToken !== storedRefreshToken) {

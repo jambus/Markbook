@@ -6,8 +6,11 @@ import {
   SyncBaseline,
   SyncOperation,
   SyncOperationState,
-  SyncOperationType
+  SyncOperationType,
+  SyncPhase,
+  SyncProgress
 } from './SyncModels';
+import type { SyncProgressListener } from './SyncModels';
 import { SyncPlanner } from './SyncPlanner';
 import { ProviderChangePage, SyncResult } from './SyncProvider';
 import type { SyncProvider } from './SyncProvider';
@@ -38,7 +41,8 @@ export class SyncEngine {
     localStore: LocalSyncStore,
     baselineStore: SyncBaselineStore,
     notebookId: string,
-    deviceName: string
+    deviceName: string,
+    progressListener?: SyncProgressListener
   ): Promise<SyncResult> {
     if (this.activeProvider) {
       throw new Error('A sync operation is already running');
@@ -48,14 +52,22 @@ export class SyncEngine {
     this.cancelled = false;
 
     try {
+      this.report(progressListener, SyncPhase.SCANNING_LOCAL, 0, 0);
       const previous = await baselineStore.load(provider.id, notebookId) ??
         new SyncBaseline(provider.id, notebookId, []);
       await provider.connect();
       this.ensureNotCancelled();
       const localFiles = await localStore.listSnapshots();
+      this.report(progressListener, SyncPhase.READING_REMOTE, 0, 0);
       const remote = await this.readRemote(provider, previous);
       const plan = SyncPlanner.createPlan(localFiles, remote.files, previous);
       const result = new SyncResult(0, 0, 0, 0);
+      this.report(
+        progressListener,
+        SyncPhase.APPLYING,
+        0,
+        plan.operations.length
+      );
 
       for (let index = 0; index < plan.operations.length; index += 1) {
         this.ensureNotCancelled();
@@ -66,9 +78,22 @@ export class SyncEngine {
           deviceName,
           result
         );
+        this.report(
+          progressListener,
+          SyncPhase.APPLYING,
+          index + 1,
+          plan.operations.length,
+          plan.operations[index].relativePath
+        );
       }
 
       this.ensureNotCancelled();
+      this.report(
+        progressListener,
+        SyncPhase.VERIFYING,
+        plan.operations.length,
+        plan.operations.length
+      );
       const finalLocal = await localStore.listSnapshots();
       const finalRemote = await this.readAllRemote(provider);
       const committedFiles = this.reconcile(finalLocal, finalRemote.files);
@@ -81,6 +106,12 @@ export class SyncEngine {
         Date.now(),
         finalRemote.folders
       ));
+      this.report(
+        progressListener,
+        SyncPhase.COMPLETED,
+        plan.operations.length,
+        plan.operations.length
+      );
       return result;
     } finally {
       this.activeProvider = undefined;
@@ -146,7 +177,7 @@ export class SyncEngine {
       operation.state = SyncOperationState.COMPLETED;
     } catch (error) {
       operation.state = SyncOperationState.FAILED;
-      throw error;
+      throw new Error(`Sync operation failed for ${operation.relativePath}`);
     }
   }
 
@@ -299,6 +330,23 @@ export class SyncEngine {
   private ensureNotCancelled(): void {
     if (this.cancelled) {
       throw new Error('Sync cancelled');
+    }
+  }
+
+  private report(
+    listener: SyncProgressListener | undefined,
+    phase: SyncPhase,
+    completedOperations: number,
+    totalOperations: number,
+    currentPath?: string
+  ): void {
+    if (listener) {
+      listener(new SyncProgress(
+        phase,
+        completedOperations,
+        totalOperations,
+        currentPath
+      ));
     }
   }
 }

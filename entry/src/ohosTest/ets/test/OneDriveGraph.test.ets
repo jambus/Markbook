@@ -18,30 +18,16 @@ export default function oneDriveGraphTest(): void {
 
     it('parses files and an opaque delta cursor', 0, () => {
       const root = new OneDriveRootInfo('root-id', '/drive/root:/Apps/Markbook');
-      const page = OneDriveGraphCodec.parseDelta(JSON.stringify({
-        value: [
-          {
-            id: 'notes-folder',
-            name: 'notes',
-            parentReference: {
-              id: 'root-id'
-            },
-            folder: {}
-          },
-          {
-            id: 'item-1',
-            name: 'a.md',
-            size: 12,
-            eTag: 'r2',
-            lastModifiedDateTime: '2026-07-24T08:00:00Z',
-            parentReference: {
-              id: 'notes-folder'
-            },
-            file: {}
-          }
-        ],
-        '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?token=opaque'
-      }), root, []);
+      const page = OneDriveGraphCodec.parseDelta(
+        '{"value":[{"id":"notes-folder","name":"notes",' +
+          '"parentReference":{"id":"root-id"},"folder":{}},' +
+          '{"id":"item-1","name":"a.md","size":12,"eTag":"r2",' +
+          '"lastModifiedDateTime":"2026-07-24T08:00:00Z",' +
+          '"parentReference":{"id":"notes-folder"},"file":{}}],' +
+          '"@odata.deltaLink":"https://graph.microsoft.com/v1.0/delta?token=opaque"}',
+        root,
+        []
+      );
 
       expect(page.changes.length).assertEqual(1);
       expect(page.changes[0].relativePath).assertEqual('notes/a.md');
@@ -56,15 +42,12 @@ export default function oneDriveGraphTest(): void {
       const baseline = [
         new FileSnapshot('attachments/old.jpg', 10, 'hash', 1, 'r1', false, 'item-2')
       ];
-      const page = OneDriveGraphCodec.parseDelta(JSON.stringify({
-        value: [
-          {
-            id: 'item-2',
-            deleted: {}
-          }
-        ],
-        '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?token=next'
-      }), root, baseline);
+      const page = OneDriveGraphCodec.parseDelta(
+        '{"value":[{"id":"item-2","deleted":{}}],' +
+          '"@odata.deltaLink":"https://graph.microsoft.com/v1.0/delta?token=next"}',
+        root,
+        baseline
+      );
 
       expect(page.changes[0].relativePath).assertEqual('attachments/old.jpg');
       expect(page.changes[0].deleted).assertTrue();
@@ -99,16 +82,13 @@ export default function oneDriveGraphTest(): void {
         new ProviderFolderSnapshot('notes', 'notes-folder', 'root-id'),
         new ProviderFolderSnapshot('notes/archive', 'archive-folder', 'notes-folder')
       ];
-      const page = OneDriveGraphCodec.parseDelta(JSON.stringify({
-        value: [
-          {
-            id: 'notes-folder',
-            folder: {},
-            deleted: {}
-          }
-        ],
-        '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?token=next'
-      }), root, baseline, folders);
+      const page = OneDriveGraphCodec.parseDelta(
+        '{"value":[{"id":"notes-folder","folder":{},"deleted":{}}],' +
+          '"@odata.deltaLink":"https://graph.microsoft.com/v1.0/delta?token=next"}',
+        root,
+        baseline,
+        folders
+      );
 
       expect(page.changes.length).assertEqual(2);
       expect(page.changes[0].deleted).assertTrue();

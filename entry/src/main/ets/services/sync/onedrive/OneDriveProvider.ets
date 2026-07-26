@@ -23,12 +23,24 @@ const SMALL_UPLOAD_LIMIT = 4 * 1024 * 1024;
 const UPLOAD_FRAGMENT_SIZE = 5 * 320 * 1024;
 const READ_CHUNK_SIZE = 1024 * 1024;
 
+class EmptyFolderFacet {
+}
+
+class CreateFolderRequest {
+  name: string;
+  folder: EmptyFolderFacet = new EmptyFolderFacet();
+  '@microsoft.graph.conflictBehavior': string = 'fail';
+
+  constructor(name: string) {
+    this.name = name;
+  }
+}
+
 class OneDriveContentSource implements SyncContentSource {
   readonly size: number;
   private readonly transport: HttpTransport;
   private readonly url: string;
   private readonly accessToken: string;
-  private readonly textCodec: TextCodec;
   private readonly expectedRevision: string;
   private closed: boolean = false;
 
@@ -88,6 +100,7 @@ export class OneDriveProvider implements SyncProvider {
   readonly displayName: string = 'OneDrive';
   private readonly transport: HttpTransport;
   private readonly accessToken: string;
+  private readonly textCodec: TextCodec;
   private readonly baseUrl: string;
   private root?: OneDriveRootInfo;
   private readonly folders: Array<ProviderFolderSnapshot> = [];
@@ -239,7 +252,7 @@ export class OneDriveProvider implements SyncProvider {
       if (recoveredRevision) {
         return recoveredRevision;
       }
-      throw error;
+      throw new Error(`OneDrive small upload failed for ${relativePath}`);
     }
   }
 
@@ -302,7 +315,7 @@ export class OneDriveProvider implements SyncProvider {
         await this.transport.request(new HttpRequestData(HttpMethod.DELETE, uploadUrl));
       } catch (cancelError) {
       }
-      throw error;
+      throw new Error(`OneDrive resumable upload failed for ${relativePath}`);
     }
   }
 
@@ -375,11 +388,9 @@ export class OneDriveProvider implements SyncProvider {
 
       const createHeaders = this.authHeaders();
       createHeaders.contentType = 'application/json';
-      const createBody = this.textCodec.encode(JSON.stringify({
-        name: segments[index],
-        folder: {},
-        '@microsoft.graph.conflictBehavior': 'fail'
-      }));
+      const createBody = this.textCodec.encode(
+        JSON.stringify(new CreateFolderRequest(segments[index]))
+      );
       const created = await this.transport.request(new HttpRequestData(
         HttpMethod.POST,
         `${this.baseUrl}/me/drive/items/${encodeURIComponent(parentId)}/children`,

@@ -34,7 +34,7 @@ export class SyncBaselineCodec {
       version: 1,
       providerId: baseline.providerId,
       notebookId: baseline.notebookId,
-      files: baseline.files.map((file: FileSnapshot) => {
+      files: baseline.files.map((file: FileSnapshot): FileSnapshotJson => {
         if (file.contentHash === undefined) {
           throw new Error('Cannot persist a sync baseline without a content hash');
         }
@@ -51,12 +51,16 @@ export class SyncBaselineCodec {
       }),
       cursor: baseline.cursor,
       completedAt: baseline.completedAt,
-      providerFolders: baseline.providerFolders.map((folder: ProviderFolderSnapshot) => ({
-        relativePath: folder.relativePath,
-        providerItemId: folder.providerItemId,
-        providerParentId: folder.providerParentId,
-        deleted: folder.deleted
-      }))
+      providerFolders: baseline.providerFolders.map(
+        (folder: ProviderFolderSnapshot): ProviderFolderJson => {
+          return {
+            relativePath: folder.relativePath,
+            providerItemId: folder.providerItemId,
+            providerParentId: folder.providerParentId,
+            deleted: folder.deleted
+          };
+        }
+      )
     };
     return JSON.stringify(value);
   }

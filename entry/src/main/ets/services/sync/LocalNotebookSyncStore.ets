@@ -122,7 +122,7 @@ export class LocalNotebookSyncStore implements LocalSyncStore {
       }
     } catch (error) {
       this.safeUnlink(tempPath);
-      throw error;
+      throw new Error('Failed to write synchronized content');
     }
 
     this.safeUnlink(backupPath);
@@ -137,7 +137,7 @@ export class LocalNotebookSyncStore implements LocalSyncStore {
       if (!fs.accessSync(targetPath) && fs.accessSync(backupPath)) {
         fs.renameSync(backupPath, targetPath);
       }
-      throw error;
+      throw new Error('Failed to replace synchronized content');
     }
   }
 

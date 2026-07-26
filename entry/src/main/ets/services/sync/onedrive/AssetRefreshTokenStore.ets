@@ -121,7 +121,7 @@ export class AssetRefreshTokenStore implements RefreshTokenStore {
       if ((error as BusinessError).code === NOT_FOUND) {
         return undefined;
       }
-      throw error;
+      throw new Error('Asset Store query failed');
     }
   }
 
@@ -156,7 +156,7 @@ export class AssetRefreshTokenStore implements RefreshTokenStore {
       await asset.remove(query);
     } catch (error) {
       if ((error as BusinessError).code !== NOT_FOUND) {
-        throw error;
+        throw new Error('Asset Store removal failed');
       }
     }
   }

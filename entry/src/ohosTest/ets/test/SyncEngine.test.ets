@@ -1,5 +1,10 @@
 import { describe, expect, it } from '@ohos/hypium';
-import { FileSnapshot, SyncBaseline } from '../../../main/ets/services/sync/SyncModels';
+import {
+  FileSnapshot,
+  SyncBaseline,
+  SyncPhase,
+  SyncProgress
+} from '../../../main/ets/services/sync/SyncModels';
 import type { SyncContentSource } from '../../../main/ets/services/sync/SyncContent';
 import {
   ProviderChangePage
@@ -260,6 +265,30 @@ export default function syncEngineTest(): void {
       expect(result.uploaded).assertEqual(1);
       expect(provider.files[0].content[0]).assertEqual(2);
       expect(baselines.commits).assertEqual(1);
+    });
+
+    it('reports operation-level progress through final verification', 0, async () => {
+      const local = new MemoryLocalStore([new MemoryFile('notes/a.md', bytes(2))]);
+      const provider = new MemoryProvider([new MemoryFile('notes/a.md', bytes(1), 'r1')]);
+      const baselines = new MemoryBaselineStore(oldBaseline());
+      const updates: Array<SyncProgress> = [];
+
+      await new SyncEngine().sync(
+        provider,
+        local,
+        baselines,
+        'notebook',
+        'phone',
+        (progress: SyncProgress): void => {
+          updates.push(progress);
+        }
+      );
+
+      expect(updates[0].phase).assertEqual(SyncPhase.SCANNING_LOCAL);
+      expect(updates[2].phase).assertEqual(SyncPhase.APPLYING);
+      expect(updates[3].completedOperations).assertEqual(1);
+      expect(updates[3].currentPath).assertEqual('notes/a.md');
+      expect(updates[updates.length - 1].phase).assertEqual(SyncPhase.COMPLETED);
     });
 
     it('keeps local and remote content after a conflict', 0, async () => {

@@ -60,14 +60,11 @@ class MockHttpTransport implements HttpTransport {
 }
 
 function rootResponse(): HttpResponseData {
-  return new HttpResponseData(200, JSON.stringify({
-    id: 'root-id',
-    name: 'Markbook',
-    parentReference: {
-      path: '/drive/root:/Apps'
-    },
-    folder: {}
-  }));
+  return new HttpResponseData(
+    200,
+    '{"id":"root-id","name":"Markbook",' +
+      '"parentReference":{"path":"/drive/root:/Apps"},"folder":{}}'
+  );
 }
 
 export default function oneDriveProviderTest(): void {
@@ -75,21 +72,12 @@ export default function oneDriveProviderTest(): void {
     it('lists delta changes with bearer authentication', 0, async () => {
       const transport = new MockHttpTransport();
       transport.responses.push(rootResponse());
-      transport.responses.push(new HttpResponseData(200, JSON.stringify({
-        value: [
-          {
-            id: 'item-1',
-            name: 'a.md',
-            size: 10,
-            eTag: 'r1',
-            parentReference: {
-              path: '/drive/root:/Apps/Markbook/notes'
-            },
-            file: {}
-          }
-        ],
-        '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?token=opaque'
-      })));
+      transport.responses.push(new HttpResponseData(
+        200,
+        '{"value":[{"id":"item-1","name":"a.md","size":10,"eTag":"r1",' +
+          '"parentReference":{"path":"/drive/root:/Apps/Markbook/notes"},"file":{}}],' +
+          '"@odata.deltaLink":"https://graph.microsoft.com/v1.0/delta?token=opaque"}'
+      ));
       const provider = new OneDriveProvider(
         transport,
         'secret-token',
@@ -108,18 +96,14 @@ export default function oneDriveProviderTest(): void {
       const transport = new MockHttpTransport();
       transport.responses.push(rootResponse());
       transport.responses.push(new HttpResponseData(404, ''));
-      transport.responses.push(new HttpResponseData(201, JSON.stringify({
-        id: 'notes-id',
-        name: 'notes',
-        folder: {}
-      })));
-      transport.responses.push(new HttpResponseData(201, JSON.stringify({
-        id: 'item-1',
-        name: 'a.md',
-        size: 3,
-        eTag: 'r1',
-        file: {}
-      })));
+      transport.responses.push(new HttpResponseData(
+        201,
+        '{"id":"notes-id","name":"notes","folder":{}}'
+      ));
+      transport.responses.push(new HttpResponseData(
+        201,
+        '{"id":"item-1","name":"a.md","size":3,"eTag":"r1","file":{}}'
+      ));
       const provider = new OneDriveProvider(
         transport,
         'secret-token',
@@ -142,13 +126,10 @@ export default function oneDriveProviderTest(): void {
     it('downloads only the requested byte range at the expected revision', 0, async () => {
       const transport = new MockHttpTransport();
       transport.responses.push(rootResponse());
-      transport.responses.push(new HttpResponseData(200, JSON.stringify({
-        id: 'item-1',
-        name: 'a.md',
-        size: 4,
-        eTag: 'r2',
-        file: {}
-      })));
+      transport.responses.push(new HttpResponseData(
+        200,
+        '{"id":"item-1","name":"a.md","size":4,"eTag":"r2","file":{}}'
+      ));
       transport.responses.push(new HttpResponseData(
         206,
         undefined,
@@ -173,21 +154,20 @@ export default function oneDriveProviderTest(): void {
       const transport = new MockHttpTransport();
       transport.responses.push(rootResponse());
       transport.responses.push(new HttpResponseData(404, ''));
-      transport.responses.push(new HttpResponseData(201, JSON.stringify({
-        id: 'attachments-id',
-        folder: {}
-      })));
-      transport.responses.push(new HttpResponseData(200, JSON.stringify({
-        uploadUrl: 'https://upload.example.test/session'
-      })));
+      transport.responses.push(new HttpResponseData(
+        201,
+        '{"id":"attachments-id","folder":{}}'
+      ));
+      transport.responses.push(new HttpResponseData(
+        200,
+        '{"uploadUrl":"https://upload.example.test/session"}'
+      ));
       transport.responses.push(new HttpResponseData(202, '{}'));
       transport.responses.push(new HttpResponseData(202, '{}'));
-      transport.responses.push(new HttpResponseData(201, JSON.stringify({
-        id: 'photo-id',
-        size: 4 * 1024 * 1024 + 1,
-        eTag: 'photo-r1',
-        file: {}
-      })));
+      transport.responses.push(new HttpResponseData(
+        201,
+        '{"id":"photo-id","size":4194305,"eTag":"photo-r1","file":{}}'
+      ));
       const provider = new OneDriveProvider(
         transport,
         'secret-token',
@@ -212,16 +192,14 @@ export default function oneDriveProviderTest(): void {
       const transport = new MockHttpTransport();
       transport.responses.push(rootResponse());
       transport.responses.push(new HttpResponseData(404, ''));
-      transport.responses.push(new HttpResponseData(201, JSON.stringify({
-        id: 'notes-id',
-        folder: {}
-      })));
-      transport.responses.push(new HttpResponseData(200, JSON.stringify({
-        id: 'item-1',
-        size: 3,
-        eTag: 'recovered-r1',
-        file: {}
-      })));
+      transport.responses.push(new HttpResponseData(
+        201,
+        '{"id":"notes-id","folder":{}}'
+      ));
+      transport.responses.push(new HttpResponseData(
+        200,
+        '{"id":"item-1","size":3,"eTag":"recovered-r1","file":{}}'
+      ));
       transport.responses.push(new HttpResponseData(
         206,
         undefined,
