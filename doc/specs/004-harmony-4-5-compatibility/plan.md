@@ -1,19 +1,23 @@
-# Implementation Plan: HarmonyOS 4/5 兼容
+# Implementation Plan: Mate 手机适配
 
 ## Strategy
 
-使用单一 Stage HAP，以 API 12 编译、API 10 为最低兼容版本。公共功能只依赖
-API 10；高版本增强必须放在可替换适配器后，且不能进入 API 10 启动路径。
+使用单一 Stage HAP，以当前可用 SDK 编译，并以 Mate 60 及后续 Mate 手机作为
+主要验收对象。最低 HarmonyOS/API 版本在 Mate 60 真机验证后确定；不为保持旧版
+系统而牺牲透视校正、文件访问、同步和安全存储体验。
 
 ## Compatibility Decisions
 
-- 使用 `ACTION_IMAGE_CAPTURE` 代替 API 11 的 `cameraPicker`。
-- 使用 `getContext` 和全局 `promptAction` 兼容 API 10。
-- OneDrive refresh token 与 S3 凭据首版仅驻留内存。
-- `useNormalizedOHMUrl` 设为 `false`，满足 API 10 构建约束。
+- 使用系统能力适配层隔离 Mate 系列不同 HarmonyOS 版本差异。
+- Google Drive 与 NAS 作为互斥同步 Provider。
+- 登录状态优先保存到系统安全存储。
+- 保持当前构建约束配置，直到 Mate 60 真机确定最低版本。
+- 使用 ArkUI 的弹性布局和安全区域 API，覆盖 Mate 系列的屏幕密度、横竖屏和
+  字体缩放变化；不得按单一机型写死尺寸。
+- 以 Mate 60 作为基线设备，至少增加一台后续 Mate 手机验证系统升级后的行为。
 
 ## Risks
 
-系统相机返回 URI、OAuth 浏览器回调和各 NAS 的 S3 兼容程度必须真机验证。
-本机仅安装 API 21 SDK，因此当前构建是 API 10 兼容告警审计，不替代 API 10
-SDK 和 HarmonyOS 4 真机验收。
+系统相机返回 URI、Google 授权回调、四点透视校正、屏幕适配和 NAS 通用协议必须
+在 Mate 60 与后续 Mate 手机真机验证。本机仅安装 API 21 SDK，当前构建不能替代
+Mate 设备上的真实验收。

@@ -21,7 +21,7 @@
 
 ## IV. 同步 Provider 隔离
 
-OneDrive、S3 兼容 NAS 等实现必须遵循统一同步契约。鉴权、远端协议和 UI
+Google Drive、NAS 等实现必须遵循统一同步契约。鉴权、远端协议和 UI
 不得进入本地笔记仓储层；新增 Provider 不得改变笔记文件格式。
 
 ## V. 隐私与最小权限

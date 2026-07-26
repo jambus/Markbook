@@ -1,14 +1,14 @@
-# Feature Specification: OneDrive 与 NAS 同步
+# Feature Specification: Google Drive 与 NAS 同步
 
-**Status**: Draft / Needs Clarification  
-**Priority**: P2  
+**Status**: Draft
+**Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments
 
 ## User Stories
 
 ### US1 配置远端（P1）
 
-用户可以连接 OneDrive 或 S3 兼容 NAS，选择远端 Markbook 前缀，并在明确同意后
+用户可以连接 Google Drive 或 NAS，选择其中一个远端同步目标，并在明确同意后
 开始同步。
 
 ### US2 手动双向同步（P1）
@@ -21,16 +21,29 @@
 
 网络中断或应用退出不会损坏本地文件；下次同步从安全状态继续。
 
+### US4 选择性自动同步（P1）
+
+用户默认手动触发同步，也可以开启自动同步提示；离线编辑后网络恢复时，应用
+提示用户确认同步。
+
 ## Functional Requirements
 
 - **FR-301** Provider 必须实现统一的枚举、下载、上传、删除和增量状态契约。
-- **FR-302** OneDrive 必须使用 Authorization Code + PKCE 和最小权限。
-- **FR-303** NAS 首版使用 S3 兼容 HTTPS 接口和 SigV4，不允许忽略证书错误。
-- **FR-304** 首版必须双向同步 `notes/` 中的 Markdown 和
-  `attachments/` 中的附件；本机 `.markbook/` 元数据不得上传。
+- **FR-302** Google Drive Provider 必须使用官方授权流程和最小权限，不能要求
+  用户把密码交给 Markbook。
+- **FR-303** NAS Provider 必须支持威联通 TS-251D 和极空间的局域网、外网访问；
+  具体通用协议须通过真实设备验证，不得依赖单一厂商私有 API。
+- **FR-304** 首版必须双向同步整个 Vault 的 Markdown、照片附件和回收站内容，
+  但不得主动同步 `.obsidian/` 配置目录或本机索引元数据。
 - **FR-305** 双边修改不得静默覆盖，默认保留冲突副本。
 - **FR-306** 同步必须可取消、可重试并提供文件级错误摘要。
 - **FR-307** 只有完整成功后才能更新同步基线。
-- **FR-308** HarmonyOS 4 上凭据和令牌只保留在进程内；不得降级为明文持久化。
-  HarmonyOS 5 可在后续兼容实现中使用 Asset Store，日志始终必须脱敏。
+- **FR-308** 登录状态必须优先保存到系统安全存储；能力不足时只在当前进程保留，
+  不得降级为明文持久化，日志始终必须脱敏。
 - **FR-309** 首次上传前必须展示数据目标和范围并取得用户确认。
+- **FR-310** Google Drive 与 NAS 必须是互斥的同步目标；切换目标前必须完成
+  当前目标的同步或明确提示未同步内容。
+- **FR-311** 同步必须支持增量传输、断点恢复、取消、重试和文件级错误摘要，
+  面向几十 GB、较多照片的 Vault 不得每次全量上传。
+- **FR-312** 删除操作必须同步到远端回收站，不得直接静默永久删除。
+- **FR-313** 双边修改不得静默覆盖，默认保留带设备或时间信息的冲突副本。

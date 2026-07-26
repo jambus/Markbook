@@ -1,9 +1,12 @@
-# Tasks: HarmonyOS 4/5 兼容
+# Tasks: HarmonyOS 与 Mate 设备兼容
 
-- [x] T401 设置 API 10 最低兼容版本和 API 12 目标版本。
-- [x] T402 移除核心路径中的 CameraPicker 与 Asset Store 运行依赖。
-- [x] T403 消除主 HAP 的 API 11+ 可用性告警。
+- [ ] T401 根据 Mate 60 真机能力确定最低 HarmonyOS/API 版本。
+- [ ] T402 验证系统相机、文件访问、安全存储和网络能力。
+- [ ] T403 审计 Mate 60 及后续系统上的 API 可用性和权限失败路径。
 - [x] T404 构建主 HAP 与 ohosTest HAP。
-- [ ] T405 在 HarmonyOS 4 真机验证创建、编辑、拍照和重启恢复。
-- [ ] T406 在 HarmonyOS 5 真机执行同一组回归。
-- [ ] T407 在两版系统验证 OneDrive 浏览器回调与 S3 NAS 同步。
+- [ ] T405 在 Mate 60 真机验证创建、编辑、每日笔记和重启恢复。
+- [ ] T406 在 Mate 60 真机验证拍照、裁剪、四点透视校正和附件恢复。
+- [ ] T407 在 Mate 60 真机验证 Google Drive、NAS 局域网和外网同步。
+- [ ] T408 验证竖横屏、安全区域、字体缩放和附件预览布局。
+- [ ] T409 在至少一台后续 Mate 手机验证启动、权限、相机、存储和同步流程。
+- [ ] T410 建立设备回归记录，包含机型、HarmonyOS 版本、API、屏幕配置和测试结果。

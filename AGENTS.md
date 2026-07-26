@@ -17,8 +17,9 @@ before changing scope.
 ## Build, Test, and Development Commands
 
 Use DevEco Studio 5.0.0 Release or newer with an installed SDK at or above
-HarmonyOS 6.0.1/API 21. The app targets HarmonyOS 5/API 12 and keeps
-`compatibleSdkVersion` at HarmonyOS 4/API 10.
+HarmonyOS 6.0.1/API 21. The current build profile targets HarmonyOS 5/API 12
+and keeps `compatibleSdkVersion` at HarmonyOS 4/API 10; the product requirement
+is being revalidated on Mate 60 before raising the minimum version.
 
 - `ohpm install` installs project dependencies.
 - `hvigorw assembleHap` builds the entry HAP.
@@ -27,6 +28,9 @@ HarmonyOS 6.0.1/API 21. The app targets HarmonyOS 5/API 12 and keeps
 
 The wrapper is supplied by DevEco Studio when the project is synchronized. Do
 not commit `.hvigor/`, `oh_modules/`, signed HAPs, or local SDK paths.
+For CLI builds, `DEVECO_SDK_HOME` must point to an SDK root containing a
+version directory such as `HarmonyOS-6.0.1`; `.../sdk/default` alone is not
+the expected root. Use `--no-daemon` if the local Hvigor cache has a stale lock.
 
 ## Coding Style & Naming Conventions
 
@@ -50,11 +54,11 @@ History uses short English subjects such as `Logic implement` and
 `Init the spec-kit structure along with doc folder`. Prefer a clear imperative
 subject such as `Add local attachment storage`, and keep commits focused. Pull
 requests must describe user-visible behavior, list build/test results, link the
-relevant issue, and include phone and tablet screenshots for UI changes.
+relevant issue, and include Mate phone screenshots for UI changes.
 
 ## Security & Configuration
 
-Never commit OneDrive tokens, S3 credentials, personal notebooks, signing keys,
+Never commit Google Drive tokens, NAS credentials, personal notebooks, signing keys,
 or `local.properties`. Use HarmonyOS secure storage where the compatible API
 allows it; otherwise keep credentials only in process memory. Request only
 required permissions, and redact remote URLs and secrets from logs.

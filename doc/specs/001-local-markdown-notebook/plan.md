@@ -2,8 +2,8 @@
 
 ## Technical Context
 
-- HarmonyOS Stage model，ArkTS/ArkUI，兼容 API 10，目标 API 12。
-- 数据根目录为应用沙箱 `files/Markbook/`。
+- HarmonyOS Stage model，ArkTS/ArkUI，优先适配 Mate 60 及后续 Mate 手机。
+- 数据根目录由用户选择的 Obsidian Vault 授权目录决定；索引仍只用于性能。
 - Markdown 文件是事实源；索引仅用于搜索和列表性能。
 
 ## Constitution Check
@@ -18,7 +18,7 @@
 
 ## Design
 
-`NotebookRepository` 负责目录和原子文件写入；`MarkdownDocument` 处理标题等
+`NotebookRepository` 负责 Vault 目录和原子文件写入；`MarkdownDocument` 处理标题等
 纯文本规则；UI 通过 ViewModel/状态层调用仓储，不直接访问文件。保存采用
 “临时文件 → flush → rename”替换目标文件。搜索索引可重建，不参与导出。
 
@@ -27,4 +27,4 @@
 1. 修正现有仓储为原子保存并补齐异常恢复。
 2. 增加自动保存、删除/回收站与恢复。
 3. 增加 Markdown 预览和可重建全文索引。
-4. 完成单测、1,000 篇性能测试及手机/平板验收。
+4. 完成单测、1,000 篇性能测试及 Mate 60 真机验收。

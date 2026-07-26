@@ -7,11 +7,10 @@
 - `contentHash`：本地和基线必须是 SHA-256；远端 API 不提供内容摘要时可为空，
   以 `providerRevision` 判断远端变化。
 - `modifiedAt`
-- `providerRevision`：OneDrive eTag/cTag 或 S3 ETag。
-- `providerItemId`：OneDrive 等服务的稳定远端 ID，用于将仅含 ID 的删除事件
+- `providerRevision`：Provider 提供的稳定版本标识，例如 ETag 或变更版本。
+- `providerItemId`：远端服务的稳定项目 ID，用于将仅含 ID 的删除事件
   映射回上次成功路径。
-- `providerParentId`：远端父目录 ID；OneDrive delta 不保证返回父路径，目录删除
-  时用它展开该目录下已知文件的删除标记。
+- `providerParentId`：远端父目录 ID；用于目录变化和删除事件映射。
 - `deleted`
 
 ## SyncBaseline
@@ -37,6 +36,5 @@
 
 ## ProviderCredential
 
-HarmonyOS 4 兼容版本仅在当前进程内保留 OneDrive 刷新令牌和 S3 密钥，应用
-重启后必须重新认证。后续 API 11 以上适配可仅保存安全存储中的引用 ID。
-访问令牌、刷新令牌和密码不得进入普通配置文件。
+登录状态优先保存为系统安全存储中的引用；系统能力不足时仅在当前进程保留，
+应用重启后重新认证。访问令牌、刷新令牌和密码不得进入普通配置文件。
