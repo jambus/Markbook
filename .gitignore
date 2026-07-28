@@ -3,8 +3,10 @@
 /.ohpm/
 /build/
 /entry/build/
+/.appanalyzer/
+**/.preview/
+**/.test/
 /local.properties
 /oh_modules/
 *.hap
 *.app
-
