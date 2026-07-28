@@ -102,7 +102,7 @@ export class AttachmentService {
       this.writeTransaction(transactionPath, descriptor.fileName);
       fs.renameSync(tempPath, targetPath);
       const attachment = new AttachmentResult(
-        `file://${targetPath}`,
+        this.fileUri(targetPath),
         descriptor.markdown,
         targetPath,
         descriptor.mimeType,
@@ -167,6 +167,10 @@ export class AttachmentService {
     }
   }
 
+  private fileUri(path: string): string {
+    return path.includes('://') ? path : `file://${path}`;
+  }
+
   private writeTransaction(path: string, fileName: string): void {
     const file = fs.openSync(
       path,
@@ -220,13 +224,28 @@ export class AttachmentService {
 
   private noteContents(): Array<string> {
     const contents: Array<string> = [];
-    const noteNames = fs.listFileSync(this.notesDir);
+    const noteNames = this.listFilesRecursively(this.notesDir);
     for (let index = 0; index < noteNames.length; index += 1) {
-      const name = noteNames[index];
-      if (name.endsWith('.md')) {
-        contents.push(fs.readTextSync(`${this.notesDir}/${name}`));
+      const relativeName = noteNames[index];
+      if (relativeName.endsWith('.md') && !relativeName.startsWith('.obsidian/')) {
+        contents.push(fs.readTextSync(`${this.notesDir}/${relativeName}`));
       }
     }
     return contents;
+  }
+
+  private listFilesRecursively(directory: string, prefix: string = ''): Array<string> {
+    const files: Array<string> = [];
+    fs.listFileSync(directory).forEach((name: string) => {
+      const relativeName = prefix.length > 0 ? `${prefix}/${name}` : name;
+      const path = `${directory}/${name}`;
+      try {
+        fs.listFileSync(path);
+        files.push(...this.listFilesRecursively(path, relativeName));
+      } catch (error) {
+        files.push(relativeName);
+      }
+    });
+    return files;
   }
 }
