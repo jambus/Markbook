@@ -1,5 +1,8 @@
 # Tasks: 远端同步
 
+同步功能在 HarmonyOS 4 APK 核心闭环完成后启动，并分别在 APK 与 HAP 实现。
+现有已完成项仅代表协议模型或 HAP 侧基础实现，不代表双端交付完成。
+
 ## Phase 1 协议无关核心
 
 - [x] T301 定义 `SyncProvider`、`SyncResult` 和冲突动作。

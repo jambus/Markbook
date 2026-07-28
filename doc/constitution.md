@@ -1,8 +1,8 @@
 # Markbook Constitution
 
-**Version**: 1.0.0  
-**Ratified**: 2026-07-24  
-**Last amended**: 2026-07-24
+**Version**: 1.1.0
+**Ratified**: 2026-07-24
+**Last amended**: 2026-07-28
 
 ## I. 本地文件是唯一事实源
 
@@ -21,19 +21,19 @@
 
 ## IV. 同步 Provider 隔离
 
-Google Drive、NAS 等实现必须遵循统一同步契约。鉴权、远端协议和 UI
-不得进入本地笔记仓储层；新增 Provider 不得改变笔记文件格式。
+Google Drive、NAS 等实现必须遵循统一同步契约。鉴权、远端协议、平台 SDK 和 UI
+不得进入本地笔记仓储层；Android APK 与 HarmonyOS HAP 不得改变笔记文件格式。
 
 ## V. 隐私与最小权限
 
 默认仅在设备本地处理内容。启用远端前明确告知数据去向。令牌和密码必须写入
-HarmonyOS 安全存储，或仅在当前进程内短暂保留；不得写入普通配置，也不得
-记录凭据、临时下载 URL 或笔记正文。
+Android 或 HarmonyOS 提供的系统安全存储，或仅在当前进程内短暂保留；不得写入
+普通配置，也不得记录凭据、临时下载 URL 或笔记正文。
 
 ## VI. 可验证交付
 
-纯逻辑使用 Hypium 单测；文件、相机、后台和网络能力必须在真实 HarmonyOS
-设备验证。每个规格的验收场景通过后才能标记完成。
+纯逻辑分别使用 Android 单测与 Hypium 单测；文件、相机、后台和网络能力必须在
+对应真实设备和系统版本验证。每个规格的验收场景通过后才能标记完成。
 
 ## Governance
 

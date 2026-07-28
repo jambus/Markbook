@@ -1,0 +1,45 @@
+# Feature Specification: HarmonyOS 4 Android APK
+
+**Status**: Planned
+**Priority**: P1
+**Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
+004-harmony-4-5-compatibility
+
+## Goal
+
+为运行 HarmonyOS 4 的 Mate 60 提供可直接安装的 Android APK，优先完成本地
+Obsidian Vault 编辑和拍照记录闭环。
+
+## User Stories
+
+### US1 安装后使用现有 Vault（P1）
+
+用户安装 APK 后选择已有 Vault，应用持久保留目录访问授权，并进入当天每日笔记。
+
+### US2 快速编辑与拍照（P1）
+
+用户可以所见即所得编辑、自动保存、手动保存、直接插入照片、矩形裁剪及四点透视
+校正；原图和校正图均保留。
+
+### US3 故障后恢复（P1）
+
+应用被强制结束、手机重启或目录权限失效后，不会静默丢失或复制 Vault；权限失效
+时明确要求用户重新选择。
+
+## Functional Requirements
+
+- **FR-501** APK 必须在 Mate 60 HarmonyOS 4 上完成安装、启动和升级安装验证。
+- **FR-502** 必须使用系统目录选择器访问 Vault，并持久保存 URI 授权。
+- **FR-503** 必须实现规格 `001` 的本地笔记 P1 能力。
+- **FR-504** 必须实现规格 `002` 的拍照、裁剪和透视校正 P1 能力。
+- **FR-505** 所有 Markdown 和附件必须直接写入 Vault，不得只存于应用私有目录。
+- **FR-506** Google Drive 接入不得依赖 Google Play Services；同步延期到本地与
+  拍照闭环验收之后。
+- **FR-507** Android API 等级、WebView、相机 URI 和后台限制必须以 Mate 60
+  HarmonyOS 4 真机结果确定。
+- **FR-508** 首个里程碑必须输出可安装 APK、版本信息和真机验收记录。
+
+## Out of Scope
+
+- HarmonyOS 5/6 上继续使用 APK。
+- 首个 APK 里程碑交付 Google Drive、NAS、OCR、标注或视频处理。

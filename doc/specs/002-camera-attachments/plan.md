@@ -2,9 +2,9 @@
 
 ## Technical Context
 
-使用 `ohos.want.action.imageCapture` 拉起系统相机并获取结果，通过 Core File
-Kit 将 URI 内容复制到笔记本附件目录。附件使用加密随机 UUID 命名，并从
-文件签名字节确定扩展名和 MIME 类型。
+Android 端使用系统相机 Intent/Activity Result，HarmonyOS 端使用
+`ohos.want.action.imageCapture`。两端都将返回 URI 的内容复制到 Vault 附件目录，
+使用加密随机 UUID 命名，并从文件签名字节确定扩展名和 MIME 类型。
 
 ## Constitution Check
 
@@ -16,7 +16,7 @@ Kit 将 URI 内容复制到笔记本附件目录。附件使用加密随机 UUID
 
 ## Transaction
 
-1. 系统相机 Ability 返回 URI。
+1. 对应平台的系统相机返回 URI。
 2. 复制到 `.markbook/tmp/`，校验非空、同步落盘并识别文件签名。
 3. 写入附件事务标记，再原子移动到 `attachments/`。
 4. 在当前选区插入相对链接并原子保存笔记。

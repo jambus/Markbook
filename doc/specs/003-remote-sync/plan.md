@@ -4,7 +4,8 @@
 
 `SyncEngine` 比较本地快照、远端变更和上次成功基线，生成操作计划；
 `SyncProvider` 只负责协议 I/O；`SyncConflictResolver` 负责无协议依赖的冲突
-决策。Google Drive 和 NAS Provider 共用文件内容流、基线、断点与错误契约。
+决策。Android APK 与 HarmonyOS HAP 分别实现该边界；Google Drive 和 NAS
+Provider 共用文件内容流、基线、断点与错误契约及测试样例。
 
 ## Constitution Check
 

@@ -1,5 +1,8 @@
 # Tasks: 本地 Markdown 笔记本
 
+当前已完成项表示现有 HarmonyOS HAP 实现状态。Android APK 对应实现由 `005`
+跟踪，HAP 对齐由 `006` 跟踪；本规格只有两端均通过后才可标记完成。
+
 ## Phase 1 数据可靠性
 
 - [x] T001 建立 `Note` 与 `MarkdownDocument` 模型。
@@ -23,5 +26,6 @@
 
 ## Phase 4 验收
 
-- [ ] T013 在 Mate 60 验证选择 Vault、创建每日笔记、编辑、重启和恢复。
+- [ ] T013 分别在 HarmonyOS 4 APK 与 HarmonyOS 5/6 HAP 验证选择 Vault、创建
+  每日笔记、编辑、重启和恢复。
 - [x] T014 完成 HAP 构建检查；Hypium 真机执行待设备连接后完成。

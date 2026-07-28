@@ -4,6 +4,11 @@
 **Priority**: P1  
 **Depends on**: None
 
+## Platform Scope
+
+本规格同时适用于 HarmonyOS 4 Android APK 与 HarmonyOS 5/6 原生 HAP。
+两端可以采用不同编辑器和文件 API，但必须产生相同的 Vault 文件结果。
+
 ## User Stories
 
 ### US1 选择 Vault 并快速记录（P1）
@@ -11,7 +16,7 @@
 用户可以选择已有 Obsidian Vault，在指定的每日笔记目录中打开或创建当天笔记，
 使用所见即所得编辑器记录内容，并在离开编辑器或应用退出前可靠保存。
 
-**Acceptance**: 新建含中文、列表和链接的笔记，重启应用后内容逐字一致。
+**Acceptance**: 两端分别新建含中文、列表和链接的笔记，重启应用后内容逐字一致。
 
 ### US2 浏览与查找（P1）
 

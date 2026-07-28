@@ -7,8 +7,8 @@
 
 1. 已确认：首版支持常用 Markdown、文件夹、全文搜索、标签和 `[[双向链接]]`；
    暂不做关系图谱和插件生态。
-2. 已确认：首发重点为 Mate 60 及后续 Mate 手机；平板和 2in1 暂不作为首要
-   验收对象。
+2. 已确认：首发设备为运行 HarmonyOS 4 的 Mate 60；优先交付 Android APK。
+   HarmonyOS 5/6 使用独立的原生 HAP 实现，平板和 2in1 暂不作为首要验收对象。
 3. 已确认：用户选择已有 Obsidian Vault，Markbook 直接读写其中内容文件。
 
 ## 编辑与图片
@@ -30,11 +30,14 @@
 11. 已确认：首版使用明文 Markdown/图片，依赖远端账号、TLS 和设备权限保护；
     暂不做端到端加密。
 12. 已确认：优先个人自用，后续考虑上架华为应用市场；发布合规要求后续补充。
+13. 已确认：Android APK 与 HarmonyOS HAP 是两套客户端实现，但必须共享 Vault
+    目录、UTF-8 Markdown、相对附件链接、冲突副本和回收站数据契约。
+14. 已确认：功能交付顺序为 HarmonyOS 4 APK 优先，HarmonyOS 5/6 HAP 随后对齐；
+    不以共享 UI 代码作为首版目标。
 
 ## 待继续确认
 
-1. 首发验收设备为 Mate 60 及后续 Mate 手机；手机端使用“选择 Vault 内任意 Markdown
-   文件并取父目录”的方式建立 Vault，2-in-1 设备可直接选择目录。最低系统版本仍以
-   Mate 60 真机回归结果为准。
+1. Android APK 在 Mate 60 HarmonyOS 4 兼容层中可用的 Android API、系统文件选择器、
+   后台限制和相机返回 URI 行为，必须通过真机确定。
 2. Google Drive 的具体授权范围和 Vault 目录映射方式。
 3. 威联通 TS-251D 与极空间共同支持的 NAS 协议及外网访问方式。

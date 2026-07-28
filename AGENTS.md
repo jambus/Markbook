@@ -2,8 +2,11 @@
 
 ## Project Structure & Module Organization
 
-Markbook is a HarmonyOS Stage-model application. App resources and metadata
-live in `AppScope/`. The `entry/` HAP contains ArkTS code under
+Markbook has two planned mobile clients sharing one Vault contract. The
+priority client is an Android APK for HarmonyOS 4 Mate 60 devices; place its
+Kotlin/Gradle sources under `android/`. The existing `entry/` module is the
+HarmonyOS 5/6 Stage HAP. App resources and metadata live in `AppScope/`, and
+ArkTS code lives under
 `entry/src/main/ets/`: UI pages are in `pages/`, data objects in `model/`, and
 filesystem or sync logic in `services/`. Resources are grouped under
 `entry/src/main/resources/base/`. Hypium tests live in
@@ -11,20 +14,22 @@ filesystem or sync logic in `services/`. Resources are grouped under
 
 Keep Markdown files and image attachments as the source of truth. Do not add a
 database dependency for data that can be derived from the notebook directory.
+Both clients must preserve identical Vault paths and relative Markdown links.
 Numbered specs live in `doc/specs/`; update `spec.md`, `plan.md`, and `tasks.md`
 before changing scope.
 
 ## Build, Test, and Development Commands
 
-Use DevEco Studio 5.0.0 Release or newer with an installed SDK at or above
-HarmonyOS 6.0.1/API 21. The current build profile targets HarmonyOS 5/API 12
-and keeps `compatibleSdkVersion` at HarmonyOS 4/API 10; the product requirement
-is being revalidated on Mate 60 before raising the minimum version.
+Prioritize the Android APK defined by spec `005`; use its Gradle Wrapper after
+the `android/` project is created. Use DevEco Studio with a matching installed
+SDK for the HarmonyOS 5/6 HAP.
 
 - `ohpm install` installs project dependencies.
 - `hvigorw assembleHap` builds the entry HAP.
 - `hvigorw assembleHap -p buildMode=test -p module=entry@ohosTest` builds the
   Hypium test HAP; install and run it on a configured device.
+- `./gradlew :app:assembleDebug` from `android/` will build the Android debug
+  APK after that project is scaffolded.
 
 The wrapper is supplied by DevEco Studio when the project is synchronized. Do
 not commit `.hvigor/`, `oh_modules/`, signed HAPs, or local SDK paths.
@@ -42,11 +47,10 @@ services. Keep user-facing strings in resources when they are reused.
 
 ## Testing Guidelines
 
-Use Hypium (`describe`, `it`, and `expect`) for unit tests. Cover Markdown
-serialization, filesystem behavior, attachment paths, and sync conflict rules.
-Run tests before each pull request. Camera changes also require a real-device
-check: capture a photo, restart the app, and confirm both the image and relative
-Markdown link remain valid.
+Use JUnit for Android logic and Hypium (`describe`, `it`, and `expect`) for
+ArkTS logic. Run shared fixtures against both clients. Camera changes require
+real-device checks on HarmonyOS 4 APK and HarmonyOS 5/6 HAP: capture a photo,
+restart, and confirm the image and relative Markdown link remain valid.
 
 ## Commit & Pull Request Guidelines
 
@@ -58,7 +62,7 @@ relevant issue, and include Mate phone screenshots for UI changes.
 
 ## Security & Configuration
 
-Never commit Google Drive tokens, NAS credentials, personal notebooks, signing keys,
-or `local.properties`. Use HarmonyOS secure storage where the compatible API
-allows it; otherwise keep credentials only in process memory. Request only
-required permissions, and redact remote URLs and secrets from logs.
+Never commit Google Drive tokens, NAS credentials, personal notebooks, signing
+keys, or `local.properties`. Use the platform secure store where available;
+otherwise keep credentials only in process memory. Request only required
+permissions, and redact remote URLs and secrets from logs.

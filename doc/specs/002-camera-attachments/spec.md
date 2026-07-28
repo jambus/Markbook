@@ -4,6 +4,11 @@
 **Priority**: P1  
 **Depends on**: 001-local-markdown-notebook
 
+## Platform Scope
+
+本规格同时适用于 Android APK 与 HarmonyOS HAP；相机调用方式可以不同，落盘、
+回滚、图片校正和 Markdown 结果必须一致。
+
 ## User Stories
 
 ### US1 从正文拍照（P1）
@@ -28,8 +33,8 @@
 
 ## Functional Requirements
 
-- **FR-201** 系统必须通过系统相机 Ability 完成拍摄，不在应用内重复实现完整
-  相机预览和拍摄流程。
+- **FR-201** 系统必须通过对应平台的系统相机入口完成拍摄，不在应用内重复实现
+  完整相机预览和拍摄流程。
 - **FR-202** 返回的 URI 必须复制到笔记本 `attachments/` 后再持久引用。
 - **FR-203** Markdown 必须使用相对路径，不能保存临时或设备绝对 URI。
 - **FR-204** 成功提示前必须同时完成附件和正文保存。
