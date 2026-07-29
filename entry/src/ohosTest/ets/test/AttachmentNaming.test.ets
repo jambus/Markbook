@@ -23,12 +23,22 @@ export default function attachmentNamingTest(): void {
       );
 
       expect(descriptor.fileName)
-        .assertEqual('photo-00112233-4455-4677-8899-aabbccddeeff.jpg');
+        .assertEqual('00112233-4455-4677-8899-aabbccddeeff-original.jpg');
       expect(descriptor.relativePath)
-        .assertEqual('../attachments/photo-00112233-4455-4677-8899-aabbccddeeff.jpg');
+        .assertEqual('../attachments/00112233-4455-4677-8899-aabbccddeeff-original.jpg');
       expect(descriptor.markdown)
-        .assertEqual('![照片](../attachments/photo-00112233-4455-4677-8899-aabbccddeeff.jpg)');
+        .assertEqual('![照片](../attachments/00112233-4455-4677-8899-aabbccddeeff-original.jpg)');
       expect(descriptor.mimeType).assertEqual('image/jpeg');
+
+      const corrected = AttachmentNaming.photo(
+        '00112233-4455-4677-8899-aabbccddeeff',
+        'jpg',
+        'corrected'
+      );
+      expect(corrected.fileName)
+        .assertEqual('00112233-4455-4677-8899-aabbccddeeff-corrected.jpg');
+      expect(corrected.relativePath)
+        .assertEqual('../attachments/00112233-4455-4677-8899-aabbccddeeff-corrected.jpg');
     });
 
     it('rejects invalid IDs and unsupported formats', 0, () => {
@@ -53,7 +63,7 @@ export default function attachmentNamingTest(): void {
     });
 
     it('keeps committed references and deletes interrupted orphan files', 0, () => {
-      const fileName = 'photo-00112233-4455-4677-8899-aabbccddeeff.jpg';
+      const fileName = '00112233-4455-4677-8899-aabbccddeeff-original.jpg';
       expect(AttachmentRecovery.decide(
         fileName,
         true,
@@ -64,6 +74,11 @@ export default function attachmentNamingTest(): void {
         true,
         ['# Note without an attachment']
       )).assertEqual(AttachmentRecoveryAction.DELETE);
+      expect(AttachmentRecovery.decide(
+        'photo-00112233-4455-4677-8899-aabbccddeeff.jpg',
+        true,
+        ['# Existing note\n![照片](../attachments/photo-00112233-4455-4677-8899-aabbccddeeff.jpg)']
+      )).assertEqual(AttachmentRecoveryAction.KEEP);
       expect(AttachmentRecovery.decide(
         '../outside.jpg',
         true,

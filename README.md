@@ -30,6 +30,12 @@ hvigorw assembleHap
 hvigorw test
 ```
 
+HarmonyOS 4 APK（在 `android/` 目录）：
+
+```bash
+./gradlew :app:assembleDebug
+```
+
 Android APK 与 HarmonyOS HAP 必须分别在 HarmonyOS 4 Mate 60 和 HarmonyOS 5/6
 Mate 真机完成安装、文件授权、拍照和重启恢复验证。
 

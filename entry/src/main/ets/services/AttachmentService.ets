@@ -9,6 +9,7 @@ import {
 import { ImageFormatDetector } from '../model/ImageFormatDetector';
 
 export class AttachmentResult {
+  attachmentId: string;
   uri: string;
   markdown: string;
   localPath: string;
@@ -20,8 +21,10 @@ export class AttachmentResult {
     markdown: string,
     localPath: string,
     mimeType: string,
-    transactionPath: string
+    transactionPath: string,
+    attachmentId: string = ''
   ) {
+    this.attachmentId = attachmentId;
     this.uri = uri;
     this.markdown = markdown;
     this.localPath = localPath;
@@ -106,7 +109,8 @@ export class AttachmentService {
         descriptor.markdown,
         targetPath,
         descriptor.mimeType,
-        transactionPath
+        transactionPath,
+        uuid
       );
       return new AttachmentCaptureOutcome(
         AttachmentCaptureStatus.CAPTURED,
@@ -125,6 +129,22 @@ export class AttachmentService {
     } catch (error) {
       // Recovery will remove the marker after confirming the Markdown reference.
     }
+  }
+
+  recordVariant(result: AttachmentResult, fileName: string): void {
+    if (!AttachmentNaming.isPhotoFileName(fileName) || result.transactionPath.length === 0) {
+      throw new Error('Invalid attachment transaction variant');
+    }
+    let existing = '';
+    try {
+      existing = fs.readTextSync(result.transactionPath).trim();
+    } catch (error) {
+      throw new Error('Attachment transaction is unavailable');
+    }
+    if (existing.split('\n').indexOf(fileName) >= 0) {
+      return;
+    }
+    this.writeTransaction(result.transactionPath, `${existing}\n${fileName}`);
   }
 
   rollback(result: AttachmentResult): void {
@@ -199,25 +219,42 @@ export class AttachmentService {
   }
 
   private recoverTransaction(transactionPath: string): void {
-    let fileName: string = '';
+    let fileNames: Array<string> = [];
     try {
-      fileName = fs.readTextSync(transactionPath);
+      fileNames = fs.readTextSync(transactionPath)
+        .split('\n')
+        .map((name: string): string => name.trim())
+        .filter((name: string): boolean => name.length > 0);
     } catch (error) {
       this.safeUnlink(transactionPath);
       return;
     }
-    if (!AttachmentNaming.isPhotoFileName(fileName)) {
+    let invalidName: boolean = fileNames.length === 0;
+    for (let index = 0; index < fileNames.length; index += 1) {
+      if (!AttachmentNaming.isPhotoFileName(fileNames[index])) {
+        invalidName = true;
+        break;
+      }
+    }
+    if (invalidName) {
       this.safeUnlink(transactionPath);
       return;
     }
-    const targetPath = `${this.attachmentsDir}/${fileName}`;
-    const action = AttachmentRecovery.decide(
-      fileName,
-      fs.accessSync(targetPath),
-      this.noteContents()
-    );
-    if (action === AttachmentRecoveryAction.DELETE) {
-      this.safeUnlink(targetPath);
+    const notes = this.noteContents();
+    let committed: boolean = false;
+    for (let index = 0; index < fileNames.length; index += 1) {
+      const fileName = fileNames[index];
+      const targetPath = `${this.attachmentsDir}/${fileName}`;
+      if (AttachmentRecovery.decide(fileName, fs.accessSync(targetPath), notes) ===
+        AttachmentRecoveryAction.KEEP) {
+        committed = true;
+        break;
+      }
+    }
+    if (!committed) {
+      fileNames.forEach((fileName: string): void => {
+        this.safeUnlink(`${this.attachmentsDir}/${fileName}`);
+      });
     }
     this.safeUnlink(transactionPath);
   }

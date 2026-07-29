@@ -14,6 +14,9 @@ Markbook 提供两套安装包：
 两套客户端可以使用不同 UI 和平台 API，但必须直接读写同一种 Obsidian Vault，
 不得通过 Markbook 专有数据库交换数据。
 
+共享文件布局、附件命名、事务恢复、回收站和冲突副本规则详见
+[`contracts/vault-contract.md`](contracts/vault-contract.md)。
+
 ## User Stories
 
 ### US1 HarmonyOS 4 快速记录（P1）

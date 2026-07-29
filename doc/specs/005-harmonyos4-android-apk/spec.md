@@ -1,6 +1,6 @@
 # Feature Specification: HarmonyOS 4 Android APK
 
-**Status**: Planned
+**Status**: In Progress
 **Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
 004-harmony-4-5-compatibility

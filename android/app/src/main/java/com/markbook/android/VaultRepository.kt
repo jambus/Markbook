@@ -1,0 +1,323 @@
+package com.markbook.android
+
+import android.content.ContentResolver
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
+import java.io.InputStream
+import java.nio.charset.StandardCharsets
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
+
+data class VaultDocument(
+    val uri: Uri,
+    val name: String,
+    val mimeType: String?,
+    val parentUri: Uri? = null
+)
+
+data class PhotoAttachments(
+    val original: String,
+    val corrected: String,
+    val transactionUri: Uri
+)
+
+class VaultRepository(private val context: Context) {
+    private val resolver: ContentResolver = context.contentResolver
+    private val preferences = context.getSharedPreferences("markbook", Context.MODE_PRIVATE)
+
+    fun savedVaultUri(): Uri? = preferences.getString(VAULT_URI_KEY, null)?.let(Uri::parse)
+
+    fun rememberVault(uri: Uri) {
+        val flags = IntentFlags.READ_WRITE
+        try {
+            resolver.takePersistableUriPermission(uri, flags)
+        } catch (_: SecurityException) {
+            // Some HarmonyOS 4 builds grant the tree without exposing persistable flags.
+        }
+        preferences.edit().putString(VAULT_URI_KEY, uri.toString()).apply()
+    }
+
+    fun clearVault() {
+        preferences.edit().remove(VAULT_URI_KEY).apply()
+    }
+
+    fun dailyNote(): VaultDocument? {
+        return try {
+            val tree = savedVaultUri() ?: return null
+            val dailyDirectory = findOrCreateDirectory(tree, listOf("Daily Notes")) ?: return null
+            recoverDirectory(tree, dailyDirectory, false)
+            val attachments = findOrCreateDirectory(tree, listOf("attachments"))
+            if (attachments != null) recoverDirectory(tree, attachments, true)
+            val name = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".md"
+            val existing = findChild(tree, dailyDirectory, name)
+            existing ?: DocumentsContract.createDocument(
+                resolver,
+                dailyDirectory,
+                "text/markdown",
+                name
+            )?.let { VaultDocument(it, name, "text/markdown", dailyDirectory) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun readText(document: VaultDocument): String? = try {
+        resolver.openInputStream(document.uri)?.use {
+            String(it.readBytes(), StandardCharsets.UTF_8)
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    fun saveText(document: VaultDocument, content: String): Boolean {
+        val parent = document.parentUri ?: return false
+        val tempName = ".markbook-${UUID.randomUUID()}.tmp"
+        val temp = DocumentsContract.createDocument(resolver, parent, "text/plain", tempName)
+            ?: return false
+        var backup: Uri? = null
+        return try {
+            resolver.openOutputStream(temp, "wt")?.use { output ->
+                output.write(content.toByteArray(StandardCharsets.UTF_8))
+                output.flush()
+            } ?: throw IllegalStateException("Unable to open temporary note")
+
+            val backupName = ".markbook-${document.name}.bak"
+            backup = DocumentsContract.renameDocument(resolver, document.uri, backupName)
+            val committed = DocumentsContract.renameDocument(resolver, temp, document.name)
+            if (committed == null) throw IllegalStateException("Unable to commit note")
+            if (backup != null) {
+                try {
+                    DocumentsContract.deleteDocument(resolver, backup)
+                } catch (_: Exception) {
+                    // The committed note is valid; the next launch can clean the backup.
+                }
+            }
+            true
+        } catch (_: Exception) {
+            try {
+                if (backup != null) DocumentsContract.renameDocument(resolver, backup, document.name)
+                DocumentsContract.deleteDocument(resolver, temp)
+            } catch (_: Exception) {
+                // Recovery is retried on the next launch when the tree is available.
+            }
+            false
+        }
+    }
+
+    fun saveText(uri: Uri, name: String, content: String, parentUri: Uri): Boolean =
+        saveText(VaultDocument(uri, name, "text/markdown", parentUri), content)
+
+    fun savePhotoPair(original: InputStream, corrected: ByteArray, extension: String = "jpg"): PhotoAttachments? {
+        val tree = savedVaultUri() ?: return null
+        val directory = findOrCreateDirectory(tree, listOf("attachments")) ?: return null
+        val id = UUID.randomUUID().toString()
+        val originalName = "$id-original.$extension"
+        val correctedName = "$id-corrected.$extension"
+        val marker = DocumentsContract.createDocument(
+            resolver, directory, "text/plain", ".markbook-$id.txn"
+        ) ?: return null
+        val originalTemp = DocumentsContract.createDocument(
+            resolver, directory, "image/jpeg", ".markbook-${UUID.randomUUID()}.tmp"
+        ) ?: run {
+            try { DocumentsContract.deleteDocument(resolver, marker) } catch (_: Exception) { }
+            return null
+        }
+        val correctedTemp = DocumentsContract.createDocument(
+            resolver, directory, "image/jpeg", ".markbook-${UUID.randomUUID()}.tmp"
+        )
+        if (correctedTemp == null) {
+            try { DocumentsContract.deleteDocument(resolver, originalTemp) } catch (_: Exception) { }
+            try { DocumentsContract.deleteDocument(resolver, marker) } catch (_: Exception) { }
+            return null
+        }
+        var committedOriginal: Uri? = null
+        var committedCorrected: Uri? = null
+        return try {
+            resolver.openOutputStream(marker, "wt")?.use { output ->
+                output.write("$originalName\n$correctedName".toByteArray(StandardCharsets.UTF_8))
+            } ?: throw IllegalStateException("Unable to write photo transaction")
+            resolver.openOutputStream(originalTemp, "wt")?.use { output -> original.copyTo(output) }
+                ?: throw IllegalStateException("Unable to write original")
+            resolver.openOutputStream(correctedTemp, "wt")?.use { output -> output.write(corrected) }
+                ?: throw IllegalStateException("Unable to write corrected")
+            committedOriginal = DocumentsContract.renameDocument(resolver, originalTemp, originalName)
+                ?: throw IllegalStateException("Unable to commit original")
+            committedCorrected = DocumentsContract.renameDocument(resolver, correctedTemp, correctedName)
+                ?: throw IllegalStateException("Unable to commit corrected")
+            PhotoAttachments(originalName, correctedName, marker)
+        } catch (_: Exception) {
+            try { DocumentsContract.deleteDocument(resolver, marker) } catch (_: Exception) { }
+            try { DocumentsContract.deleteDocument(resolver, originalTemp) } catch (_: Exception) { }
+            try { DocumentsContract.deleteDocument(resolver, correctedTemp) } catch (_: Exception) { }
+            try { committedOriginal?.let { DocumentsContract.deleteDocument(resolver, it) } } catch (_: Exception) { }
+            try { committedCorrected?.let { DocumentsContract.deleteDocument(resolver, it) } } catch (_: Exception) { }
+            null
+        }
+    }
+
+    fun confirmPhotoPair(attachments: PhotoAttachments) {
+        try { DocumentsContract.deleteDocument(resolver, attachments.transactionUri) } catch (_: Exception) { }
+    }
+
+    fun rollbackPhotoPair(attachments: PhotoAttachments) {
+        val tree = savedVaultUri() ?: return
+        val directory = findOrCreateDirectory(tree, listOf("attachments")) ?: return
+        try { DocumentsContract.deleteDocument(resolver, attachments.transactionUri) } catch (_: Exception) { }
+        listOf(attachments.original, attachments.corrected).forEach { name ->
+            findChild(tree, directory, name)?.let {
+                try { DocumentsContract.deleteDocument(resolver, it.uri) } catch (_: Exception) { }
+            }
+        }
+    }
+
+    fun openRelativeAttachment(relativePath: String): InputStream? {
+        return try {
+            val tree = savedVaultUri() ?: return null
+            val document = findByRelativePath(tree, relativePath) ?: return null
+            resolver.openInputStream(document.uri)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun htmlAttachmentUrl(relativePath: String): String =
+        "markbook://attachment/" + Uri.encode(relativePath, "/")
+
+    private fun findByRelativePath(tree: Uri, relativePath: String): VaultDocument? {
+        val parts = normalizeRelativePath(relativePath).split('/').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return null
+        var parent = rootDocument(tree)
+        var current: VaultDocument? = null
+        for (part in parts) {
+            current = findChild(tree, parent, part) ?: return null
+            parent = current.uri
+        }
+        return current
+    }
+
+    private fun normalizeRelativePath(relativePath: String): String {
+        val parts = mutableListOf<String>()
+        relativePath.split('/').forEach { part ->
+            when (part) {
+                "", "." -> Unit
+                ".." -> if (parts.isNotEmpty()) parts.removeAt(parts.lastIndex)
+                else -> parts.add(part)
+            }
+        }
+        return parts.joinToString("/")
+    }
+
+    private fun findOrCreateDirectory(tree: Uri, parts: List<String>): Uri? {
+        var parent = rootDocument(tree)
+        for (part in parts) {
+            val existing = findChild(tree, parent, part)
+            parent = existing?.uri ?: DocumentsContract.createDocument(
+                resolver,
+                parent,
+                DocumentsContract.Document.MIME_TYPE_DIR,
+                part
+            )
+                ?: return null
+        }
+        return parent
+    }
+
+    private fun findChild(tree: Uri, parent: Uri, name: String): VaultDocument? {
+        return listChildren(tree, parent).firstOrNull { it.name == name }
+    }
+
+    private fun listChildren(tree: Uri, parent: Uri): List<VaultDocument> {
+        val parentId = DocumentsContract.getDocumentId(parent)
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+        return try {
+            resolver.query(children, projection, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                buildList {
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameIndex) ?: continue
+                        val id = cursor.getString(idIndex) ?: continue
+                        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                        add(VaultDocument(uri, name, cursor.getString(mimeIndex), parent))
+                    }
+                }
+            } ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun recoverDirectory(tree: Uri, directory: Uri, attachments: Boolean) {
+        listChildren(tree, directory).forEach { document ->
+            when {
+                document.name.endsWith(".tmp") -> {
+                    try { DocumentsContract.deleteDocument(resolver, document.uri) } catch (_: Exception) { }
+                }
+                document.name.endsWith(".bak") && !attachments -> {
+                    val original = document.name.removePrefix(".markbook-").removeSuffix(".bak")
+                    val existing = findChild(tree, directory, original)
+                    try {
+                        if (existing == null) DocumentsContract.renameDocument(resolver, document.uri, original)
+                        else DocumentsContract.deleteDocument(resolver, document.uri)
+                    } catch (_: Exception) { }
+                }
+                document.name.endsWith(".txn") && attachments -> {
+                    val names = readText(document)?.lines()?.filter { it.isNotBlank() }.orEmpty()
+                    val committed = names.any { attachmentReferencedByNotes(tree, it) }
+                    try {
+                        if (committed) {
+                            DocumentsContract.deleteDocument(resolver, document.uri)
+                        } else {
+                            names.forEach { name ->
+                                findChild(tree, directory, name)?.let {
+                                    DocumentsContract.deleteDocument(resolver, it.uri)
+                                }
+                            }
+                            DocumentsContract.deleteDocument(resolver, document.uri)
+                        }
+                    } catch (_: Exception) { }
+                }
+            }
+        }
+    }
+
+    private fun attachmentReferencedByNotes(tree: Uri, fileName: String): Boolean {
+        val root = rootDocument(tree)
+        val notesDirectory = findChild(tree, root, "Daily Notes") ?: return false
+        return directoryReferences(tree, notesDirectory.uri, "../attachments/$fileName")
+    }
+
+    private fun directoryReferences(tree: Uri, directory: Uri, marker: String): Boolean {
+        for (document in listChildren(tree, directory)) {
+            if (document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                if (directoryReferences(tree, document.uri, marker)) return true
+            } else if (document.name.endsWith(".md", ignoreCase = true) &&
+                readText(document)?.contains(marker) == true) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun rootDocument(tree: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(
+        tree,
+        DocumentsContract.getTreeDocumentId(tree)
+    )
+
+    private object IntentFlags {
+        const val READ_WRITE = 3
+    }
+
+    companion object {
+        private const val VAULT_URI_KEY = "vault_uri"
+    }
+}

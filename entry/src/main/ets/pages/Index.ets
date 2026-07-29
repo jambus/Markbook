@@ -1,7 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
-import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { MarkdownRichText } from '../model/MarkdownRichText';
 import { Note } from '../model/Note';
 import { NoteSearchIndex } from '../model/NoteSearchIndex';
@@ -318,11 +317,9 @@ struct Index {
       return;
     }
     try {
-      const uuid = AttachmentNaming.uuidV4(
-        cryptoFramework.createRandom().generateRandomSync(16).data
-      );
-      const descriptor = AttachmentNaming.photo(uuid, 'jpg');
+      const descriptor = AttachmentNaming.photo(this.pendingAttachment.attachmentId, 'jpg', 'corrected');
       const targetPath = `${this.repository.attachmentsDir}/${descriptor.fileName}`;
+      this.attachmentService.recordVariant(this.pendingAttachment, descriptor.fileName);
       await PhotoTransformService.writePerspectiveJpeg(
         this.pendingAttachment.localPath,
         targetPath,
@@ -333,7 +330,8 @@ struct Index {
         descriptor.markdown,
         targetPath,
         descriptor.mimeType,
-        ''
+        '',
+        this.pendingAttachment.attachmentId
       );
       await this.finishPhotoInsert(corrected, true);
     } catch (error) {
