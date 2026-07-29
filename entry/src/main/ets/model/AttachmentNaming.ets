@@ -1,13 +1,13 @@
 export class AttachmentDescriptor {
-  readonly uuid: string;
+  readonly attachmentId: string;
   readonly fileName: string;
   readonly relativePath: string;
   readonly markdown: string;
   readonly mimeType: string;
 
-  constructor(uuid: string, variant: string, extension: string, mimeType: string) {
-    this.uuid = uuid;
-    this.fileName = `${uuid}-${variant}.${extension}`;
+  constructor(attachmentId: string, variant: string, extension: string, mimeType: string) {
+    this.attachmentId = attachmentId;
+    this.fileName = `${attachmentId}-${variant}.${extension}`;
     this.relativePath = `../attachments/${this.fileName}`;
     this.markdown = `![照片](${this.relativePath})`;
     this.mimeType = mimeType;
@@ -29,15 +29,29 @@ export class AttachmentNaming {
       `${value.substring(12, 16)}-${value.substring(16, 20)}-${value.substring(20)}`;
   }
 
-  static photo(uuid: string, extension: string, variant: string = 'original'): AttachmentDescriptor {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuid)) {
-      throw new Error('Invalid attachment UUID');
+  static photo(attachmentId: string, extension: string, variant: string = 'original'): AttachmentDescriptor {
+    if (!AttachmentNaming.isAttachmentId(attachmentId)) {
+      throw new Error('Invalid attachment ID');
     }
     if (variant !== 'original' && variant !== 'corrected') {
       throw new Error('Unsupported attachment variant');
     }
     const mimeType = AttachmentNaming.mimeType(extension);
-    return new AttachmentDescriptor(uuid, variant, extension, mimeType);
+    return new AttachmentDescriptor(attachmentId, variant, extension, mimeType);
+  }
+
+  static shortPhotoId(date: Date, randomBytes: Uint8Array): string {
+    if (randomBytes.length < 3) {
+      throw new Error('Short attachment ID requires at least three random bytes');
+    }
+    const timestamp = `${date.getFullYear().toString().padStart(4, '0')}` +
+      `${(date.getMonth() + 1).toString().padStart(2, '0')}` +
+      `${date.getDate().toString().padStart(2, '0')}-` +
+      `${date.getHours().toString().padStart(2, '0')}` +
+      `${date.getMinutes().toString().padStart(2, '0')}` +
+      `${date.getSeconds().toString().padStart(2, '0')}`;
+    const randomValue = ((randomBytes[0] << 16) | (randomBytes[1] << 8) | randomBytes[2]) % 1679616;
+    return `${timestamp}-${randomValue.toString(36).padStart(4, '0')}`;
   }
 
   static mimeType(extension: string): string {
@@ -57,8 +71,13 @@ export class AttachmentNaming {
   }
 
   static isPhotoFileName(fileName: string): boolean {
-    return /^(photo-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-(original|corrected))\.(jpg|png|webp|heic)$/
+    return /^(photo-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9]{8}-[0-9]{6}-[0-9a-z]{4})-(original|corrected))\.(jpg|png|webp|heic)$/
       .test(fileName);
+  }
+
+  private static isAttachmentId(attachmentId: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(attachmentId) ||
+      /^[0-9]{8}-[0-9]{6}-[0-9a-z]{4}$/.test(attachmentId);
   }
 }
 

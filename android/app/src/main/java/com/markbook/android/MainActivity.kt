@@ -248,13 +248,18 @@ class MainActivity : Activity() {
             return
         }
         val corrected = view.outputJpeg()
-        val attachments = input.use { repository.savePhotoPair(it, corrected) }
+        val noteName = currentNote?.name
+        val attachments = if (noteName == null) null else {
+            input.use { repository.savePhotoPair(noteName, it, corrected) }
+        }
         if (attachments == null) {
             toast("照片保存失败，请检查 Vault 空间或权限")
             restoreMainScreen(bitmap)
             return
         }
-        saveCurrentNote("![${attachments.corrected}](../attachments/${attachments.corrected})") { success ->
+        saveCurrentNote(
+            "![${attachments.corrected}](../${attachments.relativeDirectory}/${attachments.corrected})"
+        ) { success ->
             if (success) {
                 repository.confirmPhotoPair(attachments)
             } else {

@@ -10,6 +10,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.security.SecureRandom
 
 data class VaultDocument(
     val uri: Uri,
@@ -21,6 +22,7 @@ data class VaultDocument(
 data class PhotoAttachments(
     val original: String,
     val corrected: String,
+    val relativeDirectory: String,
     val transactionUri: Uri
 )
 
@@ -49,8 +51,12 @@ class VaultRepository(private val context: Context) {
             val tree = savedVaultUri() ?: return null
             val dailyDirectory = findOrCreateDirectory(tree, listOf("Daily Notes")) ?: return null
             recoverDirectory(tree, dailyDirectory, false)
-            val attachments = findOrCreateDirectory(tree, listOf("attachments"))
-            if (attachments != null) recoverDirectory(tree, attachments, true)
+            findChild(tree, rootDocument(tree), "attachments")?.let { legacyAttachments ->
+                recoverDirectory(tree, legacyAttachments.uri, true, "attachments")
+            }
+            findChild(tree, rootDocument(tree), "assets")?.let { assets ->
+                recoverDirectory(tree, assets.uri, true, "assets")
+            }
             val name = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".md"
             val existing = findChild(tree, dailyDirectory, name)
             existing ?: DocumentsContract.createDocument(
@@ -110,12 +116,19 @@ class VaultRepository(private val context: Context) {
     fun saveText(uri: Uri, name: String, content: String, parentUri: Uri): Boolean =
         saveText(VaultDocument(uri, name, "text/markdown", parentUri), content)
 
-    fun savePhotoPair(original: InputStream, corrected: ByteArray, extension: String = "jpg"): PhotoAttachments? {
+    fun savePhotoPair(
+        noteName: String,
+        original: InputStream,
+        corrected: ByteArray,
+        extension: String = "jpg"
+    ): PhotoAttachments? {
         val tree = savedVaultUri() ?: return null
-        val directory = findOrCreateDirectory(tree, listOf("attachments")) ?: return null
-        val id = UUID.randomUUID().toString()
-        val originalName = "$id-original.$extension"
-        val correctedName = "$id-corrected.$extension"
+        val noteFolder = assetFolderName(noteName)
+        val relativeDirectory = "assets/$noteFolder"
+        val directory = findOrCreateDirectory(tree, listOf("assets", noteFolder)) ?: return null
+        val id = nextPhotoId(tree, directory, extension) ?: return null
+        val originalName = "$id-o.$extension"
+        val correctedName = "$id-c.$extension"
         val marker = DocumentsContract.createDocument(
             resolver, directory, "text/plain", ".markbook-$id.txn"
         ) ?: return null
@@ -147,7 +160,7 @@ class VaultRepository(private val context: Context) {
                 ?: throw IllegalStateException("Unable to commit original")
             committedCorrected = DocumentsContract.renameDocument(resolver, correctedTemp, correctedName)
                 ?: throw IllegalStateException("Unable to commit corrected")
-            PhotoAttachments(originalName, correctedName, marker)
+            PhotoAttachments(originalName, correctedName, relativeDirectory, marker)
         } catch (_: Exception) {
             try { DocumentsContract.deleteDocument(resolver, marker) } catch (_: Exception) { }
             try { DocumentsContract.deleteDocument(resolver, originalTemp) } catch (_: Exception) { }
@@ -164,7 +177,7 @@ class VaultRepository(private val context: Context) {
 
     fun rollbackPhotoPair(attachments: PhotoAttachments) {
         val tree = savedVaultUri() ?: return
-        val directory = findOrCreateDirectory(tree, listOf("attachments")) ?: return
+        val directory = findByRelativePath(tree, attachments.relativeDirectory)?.uri ?: return
         try { DocumentsContract.deleteDocument(resolver, attachments.transactionUri) } catch (_: Exception) { }
         listOf(attachments.original, attachments.corrected).forEach { name ->
             findChild(tree, directory, name)?.let {
@@ -225,6 +238,22 @@ class VaultRepository(private val context: Context) {
         return parent
     }
 
+    private fun nextPhotoId(tree: Uri, directory: Uri, extension: String): String? {
+        val timestamp = SimpleDateFormat("HHmmss", Locale.US).format(Date())
+        repeat(MAX_PHOTO_NAME_ATTEMPTS) {
+            val suffix = buildString(PHOTO_RANDOM_LENGTH) {
+                repeat(PHOTO_RANDOM_LENGTH) {
+                    append(PHOTO_RANDOM_ALPHABET[photoRandom.nextInt(PHOTO_RANDOM_ALPHABET.length)])
+                }
+            }
+            val id = "$timestamp-$suffix"
+            val originalExists = findChild(tree, directory, "$id-o.$extension") != null
+            val correctedExists = findChild(tree, directory, "$id-c.$extension") != null
+            if (!originalExists && !correctedExists) return id
+        }
+        return null
+    }
+
     private fun findChild(tree: Uri, parent: Uri, name: String): VaultDocument? {
         return listChildren(tree, parent).firstOrNull { it.name == name }
     }
@@ -256,9 +285,20 @@ class VaultRepository(private val context: Context) {
         }
     }
 
-    private fun recoverDirectory(tree: Uri, directory: Uri, attachments: Boolean) {
+    private fun recoverDirectory(
+        tree: Uri,
+        directory: Uri,
+        attachments: Boolean,
+        attachmentRelativeDirectory: String = ""
+    ) {
         listChildren(tree, directory).forEach { document ->
             when {
+                attachments && document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR -> {
+                    val childDirectory = listOf(attachmentRelativeDirectory, document.name)
+                        .filter { it.isNotEmpty() }
+                        .joinToString("/")
+                    recoverDirectory(tree, document.uri, true, childDirectory)
+                }
                 document.name.endsWith(".tmp") -> {
                     try { DocumentsContract.deleteDocument(resolver, document.uri) } catch (_: Exception) { }
                 }
@@ -272,7 +312,9 @@ class VaultRepository(private val context: Context) {
                 }
                 document.name.endsWith(".txn") && attachments -> {
                     val names = readText(document)?.lines()?.filter { it.isNotBlank() }.orEmpty()
-                    val committed = names.any { attachmentReferencedByNotes(tree, it) }
+                    val committed = names.any {
+                        attachmentReferencedByNotes(tree, "$attachmentRelativeDirectory/$it")
+                    }
                     try {
                         if (committed) {
                             DocumentsContract.deleteDocument(resolver, document.uri)
@@ -290,10 +332,10 @@ class VaultRepository(private val context: Context) {
         }
     }
 
-    private fun attachmentReferencedByNotes(tree: Uri, fileName: String): Boolean {
+    private fun attachmentReferencedByNotes(tree: Uri, attachmentPath: String): Boolean {
         val root = rootDocument(tree)
         val notesDirectory = findChild(tree, root, "Daily Notes") ?: return false
-        return directoryReferences(tree, notesDirectory.uri, "../attachments/$fileName")
+        return directoryReferences(tree, notesDirectory.uri, "../$attachmentPath")
     }
 
     private fun directoryReferences(tree: Uri, directory: Uri, marker: String): Boolean {
@@ -317,7 +359,19 @@ class VaultRepository(private val context: Context) {
         const val READ_WRITE = 3
     }
 
+    private fun assetFolderName(noteName: String): String {
+        val stem = noteName.removeSuffix(".md")
+        val cleaned = stem.map { character ->
+            if (character in "<>:\"/\\|?*" || character == '\u0000') '_' else character
+        }.joinToString("").trim().trim('.')
+        return cleaned.ifEmpty { "Untitled" }
+    }
+
     companion object {
         private const val VAULT_URI_KEY = "vault_uri"
+        private const val MAX_PHOTO_NAME_ATTEMPTS = 32
+        private const val PHOTO_RANDOM_LENGTH = 4
+        private const val PHOTO_RANDOM_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+        private val photoRandom = SecureRandom()
     }
 }

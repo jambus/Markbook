@@ -41,6 +41,18 @@ export default function attachmentNamingTest(): void {
         .assertEqual('../attachments/00112233-4455-4677-8899-aabbccddeeff-corrected.jpg');
     });
 
+    it('builds a compact capture ID for new attachments', 0, () => {
+      const captureId = AttachmentNaming.shortPhotoId(
+        new Date(2026, 6, 30, 14, 30, 15),
+        new Uint8Array([0x00, 0x00, 0x00])
+      );
+      const descriptor = AttachmentNaming.photo(captureId, 'jpg', 'corrected');
+
+      expect(captureId).assertEqual('20260730-143015-0000');
+      expect(descriptor.fileName).assertEqual('20260730-143015-0000-corrected.jpg');
+      expect(AttachmentNaming.isPhotoFileName(descriptor.fileName)).assertTrue();
+    });
+
     it('rejects invalid IDs and unsupported formats', 0, () => {
       let invalidIdRejected: boolean = false;
       let invalidFormatRejected: boolean = false;

@@ -38,9 +38,9 @@ object MarkdownCodec {
         return """
             <!doctype html>
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-            <style>body{font-family:sans-serif;font-size:18px;line-height:1.55;margin:12px;color:#202124}
+            <style>body{margin:0} #editor{font-family:sans-serif;font-size:18px;line-height:1.55;margin:12px;color:#202124}
             img{max-width:100%;height:auto} h1,h2,h3{line-height:1.25}</style></head>
-            <body contenteditable="true" spellcheck="true">$body</body>
+            <body><div id="editor" contenteditable="true" spellcheck="true">$body</div></body>
             <script>
             (function() {
               function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -63,8 +63,9 @@ object MarkdownCodec {
                 if (tag==='p' || tag==='div') return out.trim()+'\n\n';
                 return out;
               }
-              window.markbook={serialize:function(){return md(document.body).replace(/\n{3,}/g,'\n\n').trim()+'\n'} };
-              document.body.addEventListener('input',function(){ if(window.Android) Android.onChanged(); });
+              var editor=document.getElementById('editor');
+              window.markbook={serialize:function(){return md(editor).replace(/\n{3,}/g,'\n\n').trim()+'\n'} };
+              editor.addEventListener('input',function(){ if(window.Android) Android.onChanged(); });
             })();
             </script></html>
         """.trimIndent()

@@ -24,9 +24,10 @@ Markbook/
 
 - Android：系统目录选择器及持久 URI 权限、系统相机、平台安全存储、后台任务。
 - HarmonyOS：系统文件选择 Ability、CameraPicker、Asset Store、后台任务。
-- 共享契约：UTF-8 `.md`、Vault 原目录、POSIX 风格相对链接、`attachments/`、
-  `<uuid>-original.<ext>` 与 `<uuid>-corrected.<ext>` 成对命名、冲突副本和回收站
-  约定；HAP 继续兼容已有的 `photo-<uuid>.<ext>` 历史文件。
+- 共享契约：UTF-8 `.md`、Vault 原目录、POSIX 风格相对链接、
+  `assets/<note-file-stem>/`、`<HHmmss>-<xxxx>-o.<ext>` 与
+  `<HHmmss>-<xxxx>-c.<ext>` 成对命名、冲突副本和回收站约定；两端继续兼容已有
+  `attachments/` 中的 UUID 命名历史文件。
 - 同步 Provider 在两端分别实现，但必须通过同一组文件级契约测试。
 
 ## Delivery Phases

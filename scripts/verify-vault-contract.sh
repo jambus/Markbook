@@ -11,12 +11,12 @@ fail() {
 }
 
 [[ -d "$fixture/Daily Notes" ]] || fail 'missing Daily Notes directory'
-[[ -d "$fixture/attachments" ]] || fail 'missing attachments directory'
+[[ -d "$fixture/assets/2026-01-02" ]] || fail 'missing note asset directory'
 [[ -f "$note" ]] || fail 'missing Markdown fixture'
 
 grep -Fq '[[项目索引]]' "$note" || fail 'missing wikilink fixture'
-grep -Fq '../attachments/sample-original.jpg' "$note" || fail 'missing original image link'
-grep -Fq '../attachments/sample-corrected.jpg' "$note" || fail 'missing corrected image link'
+grep -Fq '../assets/2026-01-02/120000-a1b2-o.jpg' "$note" || fail 'missing original image link'
+grep -Fq '../assets/2026-01-02/120000-a1b2-c.jpg' "$note" || fail 'missing corrected image link'
 
 if find "$fixture" -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit | grep -q .; then
   fail 'fixture contains a database file'

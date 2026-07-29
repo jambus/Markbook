@@ -2,6 +2,7 @@ import { common, Want } from '@kit.AbilityKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import {
+  AttachmentDescriptor,
   AttachmentNaming,
   AttachmentRecovery,
   AttachmentRecoveryAction
@@ -77,12 +78,11 @@ export class AttachmentService {
       return new AttachmentCaptureOutcome(AttachmentCaptureStatus.CANCELLED);
     }
 
-    const uuid = AttachmentNaming.uuidV4(
+    const operationId = AttachmentNaming.uuidV4(
       cryptoFramework.createRandom().generateRandomSync(16).data
     );
-    const transactionName = `attachment-${uuid}`;
-    const tempPath = `${this.tempDir}/${transactionName}.tmp`;
-    const transactionPath = `${this.tempDir}/${transactionName}.json`;
+    const tempPath = `${this.tempDir}/attachment-${operationId}.tmp`;
+    let transactionPath = '';
     try {
       fs.copyFileSync(resultUri, tempPath);
       const stat = fs.statSync(tempPath);
@@ -97,11 +97,9 @@ export class AttachmentService {
       } finally {
         fs.closeSync(tempFile);
       }
-      const descriptor = AttachmentNaming.photo(uuid, extension);
+      const descriptor = this.createAvailableDescriptor(extension);
       const targetPath = `${this.attachmentsDir}/${descriptor.fileName}`;
-      if (fs.accessSync(targetPath)) {
-        throw new Error('Generated attachment name already exists');
-      }
+      transactionPath = `${this.tempDir}/attachment-${descriptor.attachmentId}.json`;
       this.writeTransaction(transactionPath, descriptor.fileName);
       fs.renameSync(tempPath, targetPath);
       const attachment = new AttachmentResult(
@@ -110,7 +108,7 @@ export class AttachmentService {
         targetPath,
         descriptor.mimeType,
         transactionPath,
-        uuid
+        descriptor.attachmentId
       );
       return new AttachmentCaptureOutcome(
         AttachmentCaptureStatus.CAPTURED,
@@ -118,7 +116,9 @@ export class AttachmentService {
       );
     } catch (error) {
       this.safeUnlink(tempPath);
-      this.safeUnlink(transactionPath);
+      if (transactionPath.length > 0) {
+        this.safeUnlink(transactionPath);
+      }
       throw new Error('Failed to store captured photo');
     }
   }
@@ -181,6 +181,23 @@ export class AttachmentService {
     return extension;
   }
 
+  private createAvailableDescriptor(extension: string): AttachmentDescriptor {
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const attachmentId = AttachmentNaming.shortPhotoId(
+        new Date(),
+        cryptoFramework.createRandom().generateRandomSync(3).data
+      );
+      const descriptor = AttachmentNaming.photo(attachmentId, extension);
+      const originalPath = `${this.attachmentsDir}/${descriptor.fileName}`;
+      const corrected = AttachmentNaming.photo(attachmentId, extension, 'corrected');
+      const correctedPath = `${this.attachmentsDir}/${corrected.fileName}`;
+      if (!fs.accessSync(originalPath) && !fs.accessSync(correctedPath)) {
+        return descriptor;
+      }
+    }
+    throw new Error('Unable to allocate an attachment file name');
+  }
+
   private safeUnlink(path: string): void {
     if (fs.accessSync(path)) {
       fs.unlinkSync(path);
@@ -207,11 +224,11 @@ export class AttachmentService {
   private recoverInterruptedAttachments(): void {
     fs.listFileSync(this.tempDir).forEach((name: string) => {
       const path = `${this.tempDir}/${name}`;
-      if (/^attachment-[0-9a-f-]+\.tmp$/.test(name)) {
+      if (/^attachment-[0-9a-z-]+\.tmp$/.test(name)) {
         this.safeUnlink(path);
         return;
       }
-      if (!/^attachment-[0-9a-f-]+\.json$/.test(name)) {
+      if (!/^attachment-[0-9a-z-]+\.json$/.test(name)) {
         return;
       }
       this.recoverTransaction(path);

@@ -7,7 +7,9 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.Rect
 import android.graphics.RectF
+import android.os.Build
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.hypot
@@ -20,7 +22,11 @@ enum class PhotoEditMode { RECTANGLE, PERSPECTIVE }
 class PhotoEditorView(context: android.content.Context, private val bitmap: Bitmap) : View(context) {
     var mode: PhotoEditMode = PhotoEditMode.RECTANGLE
         set(value) {
+            val modeChanged = field != value
             field = value
+            selectionVisible = true
+            if (value == PhotoEditMode.PERSPECTIVE && modeChanged) positionPerspectiveHandlesInsideEdges()
+            updateGestureExclusion()
             invalidate()
         }
 
@@ -38,7 +44,9 @@ class PhotoEditorView(context: android.content.Context, private val bitmap: Bitm
         style = Paint.Style.STROKE
         strokeWidth = 4f
     }
+    private val dimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(118, 0, 0, 0) }
     private var activeHandle = -1
+    private var selectionVisible = false
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -48,20 +56,27 @@ class PhotoEditorView(context: android.content.Context, private val bitmap: Bitm
         val top = (height - bitmap.height * scale) / 2f
         imageRect.set(left, top, left + bitmap.width * scale, top + bitmap.height * scale)
         canvas.drawBitmap(bitmap, null, imageRect, imagePaint)
+        updateGestureExclusion()
 
-        val path = Path()
-        path.moveTo(viewX(handles[0].x), viewY(handles[0].y))
-        for (i in 1..3) path.lineTo(viewX(handles[i].x), viewY(handles[i].y))
-        path.close()
-        canvas.drawPath(path, linePaint)
-        handles.forEach { point ->
-            canvas.drawCircle(viewX(point.x), viewY(point.y), 18f, handlePaint)
+        if (selectionVisible) {
+            val path = selectionPath()
+            if (mode == PhotoEditMode.PERSPECTIVE) {
+                canvas.save()
+                canvas.clipOutPath(path)
+                canvas.drawRect(imageRect, dimPaint)
+                canvas.restore()
+            }
+            canvas.drawPath(path, linePaint)
+            handles.forEach { point ->
+                canvas.drawCircle(viewX(point.x), viewY(point.y), 18f, handlePaint)
+            }
         }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (!selectionVisible) return false
                 activeHandle = nearestHandle(event.x, event.y)
                 return activeHandle >= 0
             }
@@ -137,6 +152,43 @@ class PhotoEditorView(context: android.content.Context, private val bitmap: Bitm
         }
     }
 
+    private fun positionPerspectiveHandlesInsideEdges() {
+        if (imageRect.width() <= 0f || imageRect.height() <= 0f) return
+        val horizontalInset = (EDGE_SAFE_INSET_DP * resources.displayMetrics.density /
+            imageRect.width() * bitmap.width).coerceAtMost(bitmap.width / 4f)
+        val verticalInset = (EDGE_SAFE_INSET_DP * resources.displayMetrics.density /
+            imageRect.height() * bitmap.height).coerceAtMost(bitmap.height / 4f)
+        handles[0].set(horizontalInset, verticalInset)
+        handles[1].set(bitmap.width - horizontalInset, verticalInset)
+        handles[2].set(bitmap.width - horizontalInset, bitmap.height - verticalInset)
+        handles[3].set(horizontalInset, bitmap.height - verticalInset)
+    }
+
+    private fun selectionPath(): Path = Path().apply {
+        moveTo(viewX(handles[0].x), viewY(handles[0].y))
+        for (index in 1..3) lineTo(viewX(handles[index].x), viewY(handles[index].y))
+        close()
+    }
+
+    private fun updateGestureExclusion() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (mode != PhotoEditMode.PERSPECTIVE) {
+            systemGestureExclusionRects = emptyList()
+            return
+        }
+        val radius = (GESTURE_EXCLUSION_RADIUS_DP * resources.displayMetrics.density).roundToInt()
+        val topLeft = viewY(handles[0].y).roundToInt()
+        val bottomLeft = viewY(handles[3].y).roundToInt()
+        val topRight = viewY(handles[1].y).roundToInt()
+        val bottomRight = viewY(handles[2].y).roundToInt()
+        systemGestureExclusionRects = listOf(
+            Rect(0, topLeft - radius, viewX(handles[0].x).roundToInt() + radius, topLeft + radius),
+            Rect(0, bottomLeft - radius, viewX(handles[3].x).roundToInt() + radius, bottomLeft + radius),
+            Rect(viewX(handles[1].x).roundToInt() - radius, topRight - radius, width, topRight + radius),
+            Rect(viewX(handles[2].x).roundToInt() - radius, bottomRight - radius, width, bottomRight + radius)
+        )
+    }
+
     private fun nearestHandle(x: Float, y: Float): Int {
         var nearest = -1
         var distance = Float.MAX_VALUE
@@ -155,4 +207,9 @@ class PhotoEditorView(context: android.content.Context, private val bitmap: Bitm
     private fun imageX(viewX: Float): Float = ((viewX - imageRect.left) / imageRect.width() * bitmap.width)
     private fun imageY(viewY: Float): Float = ((viewY - imageRect.top) / imageRect.height() * bitmap.height)
     private fun distance(a: PointF, b: PointF): Float = hypot(a.x - b.x, a.y - b.y)
+
+    companion object {
+        private const val EDGE_SAFE_INSET_DP = 40f
+        private const val GESTURE_EXCLUSION_RADIUS_DP = 40f
+    }
 }
