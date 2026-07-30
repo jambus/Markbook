@@ -46,6 +46,39 @@ class VaultRepository(private val context: Context) {
         preferences.edit().remove(VAULT_URI_KEY).apply()
     }
 
+    fun vaultRoot(): VaultDocument? {
+        val tree = savedVaultUri() ?: return null
+        val root = rootDocument(tree)
+        val name = try {
+            resolver.query(
+                root,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+        return VaultDocument(root, name?.takeIf { it.isNotBlank() } ?: "Vault", DocumentsContract.Document.MIME_TYPE_DIR)
+    }
+
+    fun children(directory: VaultDocument): List<VaultDocument> {
+        val tree = savedVaultUri() ?: return emptyList()
+        return listChildren(tree, directory.uri)
+    }
+
+    fun isDirectory(document: VaultDocument): Boolean =
+        document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+
+    fun refreshDocument(document: VaultDocument): VaultDocument? {
+        val tree = savedVaultUri() ?: return null
+        val parent = document.parentUri ?: return null
+        return findChild(tree, parent, document.name)
+    }
+
     fun dailyNote(): VaultDocument? {
         return try {
             val tree = savedVaultUri() ?: return null

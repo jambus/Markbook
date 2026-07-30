@@ -38,8 +38,8 @@ object MarkdownCodec {
         return """
             <!doctype html>
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-            <style>body{margin:0} #editor{font-family:sans-serif;font-size:18px;line-height:1.55;margin:12px;color:#202124}
-            img{max-width:100%;height:auto} h1,h2,h3{line-height:1.25}</style></head>
+            <style>body{margin:0;background:#fafaf8} #editor{box-sizing:border-box;max-width:760px;min-height:100vh;margin:0 auto;padding:18px 20px 56px;font-family:sans-serif;font-size:18px;line-height:1.62;color:#252932;caret-color:#6f4ee8;outline:none}
+            img{max-width:100%;height:auto;border-radius:8px} h1,h2,h3{line-height:1.25;color:#181b21} h1{font-size:1.7em;margin-top:.35em} h2{font-size:1.3em;margin-top:1.45em} p{margin:.6em 0} ul{padding-left:1.35em}</style></head>
             <body><div id="editor" contenteditable="true" spellcheck="true">$body</div></body>
             <script>
             (function() {
