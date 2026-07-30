@@ -13,13 +13,20 @@ doc/
 │   ├── vision.md
 │   ├── roadmap.md
 │   └── clarifications.md
-└── specs/
-    ├── 001-local-markdown-notebook/
-    ├── 002-camera-attachments/
-    ├── 003-remote-sync/
-    ├── 004-harmony-4-5-compatibility/ # 双端契约与迁移
-    ├── 005-harmonyos4-android-apk/    # 优先交付
-    └── 006-harmonyos5-6-native-hap/  # 后续原生对齐
+├── specs/
+│   ├── 001-local-markdown-notebook/
+│   ├── 002-camera-attachments/
+│   ├── 003-remote-sync/
+│   ├── 004-harmony-4-5-compatibility/ # 双端契约与迁移
+│   ├── 005-harmonyos4-android-apk/    # 优先交付
+│   ├── 006-harmonyos5-6-native-hap/  # 后续原生对齐
+│   └── 007-design-knowledge-base/    # 跨端设计基线
+└── design/
+    ├── design_principles.md
+    ├── components.md
+    ├── note_editor.md
+    ├── capture_flow.md
+    └── review_checklist.md
 ```
 
 每个编号目录代表一个可独立验收的能力域：
@@ -35,6 +42,11 @@ doc/
 `004` 定义双端数据契约和迁移，`005` 优先交付 HarmonyOS 4 Mate 60 Android
 APK，`006` 随后对齐 HarmonyOS 5/6 原生 HAP；`001` 至 `003` 的功能需求默认
 适用于两端。
+
+`design/` 是开发前和设计评审时必须查阅的跨端体验基线。它规定用户可见的行为、
+组件状态和评审标准；数据格式、持久化与同步规则仍以相应规格及其契约为准。新增
+或改变用户流程时，先更新对应设计文档，再同步受影响功能规格的 `spec.md`、
+`plan.md` 与 `tasks.md`。
 
 需求变更时先更新 `spec.md`，再同步计划与任务。未完成澄清的问题统一记录在
 `product/clarifications.md`，不得在实现阶段静默假设。

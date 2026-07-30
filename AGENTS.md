@@ -18,6 +18,17 @@ Both clients must preserve identical Vault paths and relative Markdown links.
 Numbered specs live in `doc/specs/`; update `spec.md`, `plan.md`, and `tasks.md`
 before changing scope.
 
+## Design Knowledge Base
+
+Before implementing or reviewing any user-visible behavior, read the relevant
+file in `docs/design/`. `design_principles.md` and `components.md` apply to all
+screens; `note_editor.md` applies to Markdown editing; `capture_flow.md` applies
+to camera, image processing, attachment storage, and insertion. Use
+`review_checklist.md` before handing off a UI or interaction change. When a
+change alters a documented flow or component behavior, update the design
+document first, then the affected numbered `spec.md`, `plan.md`, and `tasks.md`.
+The shared Vault contract remains authoritative for persisted data behavior.
+
 ## Build, Test, and Development Commands
 
 Prioritize the Android APK defined by spec `005`; use its Gradle Wrapper after
