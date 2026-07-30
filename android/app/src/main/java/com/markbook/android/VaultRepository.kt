@@ -46,6 +46,30 @@ class VaultRepository(private val context: Context) {
         preferences.edit().remove(VAULT_URI_KEY).apply()
     }
 
+    fun appearanceMode(): String = preferences.getString(APPEARANCE_MODE_KEY, APPEARANCE_NIGHT)
+        ?: APPEARANCE_NIGHT
+
+    fun setAppearanceMode(mode: String) {
+        if (mode !in setOf(APPEARANCE_DAY, APPEARANCE_NIGHT)) return
+        preferences.edit().putString(APPEARANCE_MODE_KEY, mode).apply()
+    }
+
+    fun dailyNoteDirectoryPath(): String = preferences.getString(
+        DAILY_NOTE_DIRECTORY_KEY,
+        DEFAULT_DAILY_NOTE_DIRECTORY
+    ) ?: DEFAULT_DAILY_NOTE_DIRECTORY
+
+    fun dailyNoteDirectoryParts(): List<String> = dailyNoteDirectoryPath()
+        .split('/')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && it != "." && it != ".." }
+
+    fun setDailyNoteDirectory(parts: List<String>) {
+        val cleanParts = parts.map { it.trim() }
+            .filter { it.isNotEmpty() && it != "." && it != ".." }
+        preferences.edit().putString(DAILY_NOTE_DIRECTORY_KEY, cleanParts.joinToString("/")).apply()
+    }
+
     fun vaultRoot(): VaultDocument? {
         val tree = savedVaultUri() ?: return null
         val root = rootDocument(tree)
@@ -79,10 +103,22 @@ class VaultRepository(private val context: Context) {
         return findChild(tree, parent, document.name)
     }
 
+    fun relativeAttachmentPath(note: VaultDocument, attachments: PhotoAttachments): String {
+        val tree = savedVaultUri() ?: return "../${attachments.relativeDirectory}/${attachments.corrected}"
+        val dailyDirectory = findOrCreateDirectory(tree, dailyNoteDirectoryParts())
+        val levels = if (dailyDirectory != null && note.parentUri == dailyDirectory) {
+            dailyNoteDirectoryParts().size
+        } else {
+            1
+        }
+        val prefix = List(levels) { ".." }
+        return (prefix + attachments.relativeDirectory + attachments.corrected).joinToString("/")
+    }
+
     fun dailyNote(): VaultDocument? {
         return try {
             val tree = savedVaultUri() ?: return null
-            val dailyDirectory = findOrCreateDirectory(tree, listOf("Daily Notes")) ?: return null
+            val dailyDirectory = findOrCreateDirectory(tree, dailyNoteDirectoryParts()) ?: return null
             recoverDirectory(tree, dailyDirectory, false)
             findChild(tree, rootDocument(tree), "attachments")?.let { legacyAttachments ->
                 recoverDirectory(tree, legacyAttachments.uri, true, "attachments")
@@ -366,9 +402,14 @@ class VaultRepository(private val context: Context) {
     }
 
     private fun attachmentReferencedByNotes(tree: Uri, attachmentPath: String): Boolean {
-        val root = rootDocument(tree)
-        val notesDirectory = findChild(tree, root, "Daily Notes") ?: return false
-        return directoryReferences(tree, notesDirectory.uri, "../$attachmentPath")
+        val parts = dailyNoteDirectoryParts()
+        val notesDirectory = if (parts.isEmpty()) {
+            VaultDocument(rootDocument(tree), "Vault", DocumentsContract.Document.MIME_TYPE_DIR)
+        } else {
+            findByRelativePath(tree, parts.joinToString("/")) ?: return false
+        }
+        val marker = (List(parts.size) { ".." } + attachmentPath).joinToString("/")
+        return directoryReferences(tree, notesDirectory.uri, marker)
     }
 
     private fun directoryReferences(tree: Uri, directory: Uri, marker: String): Boolean {
@@ -402,6 +443,11 @@ class VaultRepository(private val context: Context) {
 
     companion object {
         private const val VAULT_URI_KEY = "vault_uri"
+        private const val APPEARANCE_MODE_KEY = "appearance_mode"
+        private const val DAILY_NOTE_DIRECTORY_KEY = "daily_note_directory"
+        private const val DEFAULT_DAILY_NOTE_DIRECTORY = "Daily Notes"
+        const val APPEARANCE_DAY = "day"
+        const val APPEARANCE_NIGHT = "night"
         private const val MAX_PHOTO_NAME_ATTEMPTS = 32
         private const val PHOTO_RANDOM_LENGTH = 4
         private const val PHOTO_RANDOM_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"

@@ -5,7 +5,7 @@ import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 object MarkdownCodec {
-    fun toHtml(markdown: String, repository: VaultRepository): String {
+    fun toHtml(markdown: String, repository: VaultRepository, nightMode: Boolean = false): String {
         val body = StringBuilder()
         val lines = markdown.replace("\r\n", "\n").split('\n')
         var inList = false
@@ -35,11 +35,15 @@ object MarkdownCodec {
             }
         }
         if (inList) body.append("</ul>")
+        val background = if (nightMode) "#1d2128" else "#fafaf8"
+        val text = if (nightMode) "#edf0f5" else "#252932"
+        val heading = if (nightMode) "#ffffff" else "#181b21"
+        val caret = if (nightMode) "#ae92ff" else "#6750a4"
         return """
             <!doctype html>
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-            <style>body{margin:0;background:#fafaf8} #editor{box-sizing:border-box;max-width:760px;min-height:100vh;margin:0 auto;padding:18px 20px 56px;font-family:sans-serif;font-size:18px;line-height:1.62;color:#252932;caret-color:#6f4ee8;outline:none}
-            img{max-width:100%;height:auto;border-radius:8px} h1,h2,h3{line-height:1.25;color:#181b21} h1{font-size:1.7em;margin-top:.35em} h2{font-size:1.3em;margin-top:1.45em} p{margin:.6em 0} ul{padding-left:1.35em}</style></head>
+            <style>body{margin:0;background:$background} #editor{box-sizing:border-box;max-width:760px;min-height:100vh;margin:0 auto;padding:18px 20px 56px;font-family:sans-serif;font-size:18px;line-height:1.62;color:$text;caret-color:$caret;outline:none}
+            img{max-width:100%;height:auto;border-radius:8px} h1,h2,h3{line-height:1.25;color:$heading} h1{font-size:1.7em;margin-top:.35em} h2{font-size:1.3em;margin-top:1.45em} p{margin:.6em 0} ul{padding-left:1.35em}</style></head>
             <body><div id="editor" contenteditable="true" spellcheck="true">$body</div></body>
             <script>
             (function() {

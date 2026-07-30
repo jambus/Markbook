@@ -37,6 +37,9 @@ class MainActivity : Activity() {
     private val browserPath = mutableListOf<String>()
     private val browserHistory = mutableListOf<VaultDocument>()
     private var browserScrollY = 0
+    private var dailyFolderDirectory: VaultDocument? = null
+    private val dailyFolderPath = mutableListOf<String>()
+    private val dailyFolderHistory = mutableListOf<VaultDocument>()
     private var captureFile: File? = null
     private var captureUri: Uri? = null
     private var editorView: PhotoEditorView? = null
@@ -47,9 +50,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = COLOR_SURFACE
-        window.navigationBarColor = COLOR_SURFACE
         repository = VaultRepository(this)
+        applyWindowColors()
         if (repository.savedVaultUri() == null) showWelcome() else showVaultBrowser()
     }
 
@@ -66,6 +68,8 @@ class MainActivity : Activity() {
                 if (browserPath.isNotEmpty()) showParentDirectory() else super.onBackPressed()
             }
             Screen.PHOTO -> restoreEditorScreen()
+            Screen.SETTINGS -> showVaultBrowser()
+            Screen.DAILY_FOLDER_PICKER -> showSettings()
             Screen.WELCOME -> super.onBackPressed()
         }
     }
@@ -195,6 +199,7 @@ class MainActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(COLOR_PRIMARY_TEXT)
         }, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(action("设置", false) { showSettings() })
         addView(action("切换 Vault", false) { chooseVault() })
     }
 
@@ -211,6 +216,141 @@ class MainActivity : Activity() {
             setTextColor(COLOR_ACCENT)
         }, LinearLayout.LayoutParams(0, dp(48), 0.34f))
         addView(action("打开今日笔记", true) { openDailyNote() }, LinearLayout.LayoutParams(0, dp(48), 0.66f))
+    }
+
+    private fun showSettings() {
+        screen = Screen.SETTINGS
+        val root = pageRoot(COLOR_BACKGROUND)
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(8))
+            background = colorBlock(COLOR_SURFACE)
+            addView(action("‹  文件", false) { showVaultBrowser() })
+            addView(TextView(this@MainActivity).apply {
+                text = "设置"
+                textSize = 19f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_PRIMARY_TEXT)
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            addView(TextView(this@MainActivity), LinearLayout.LayoutParams(dp(76), dp(44)))
+        }
+        root.addView(toolbar, matchWrap())
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(4), dp(16), dp(24))
+        }
+        sectionLabel(content, "显示", 0)
+        val appearance = repository.appearanceMode()
+        content.addView(settingsRow("日间模式", "浅色背景与深色文字", appearance == VaultRepository.APPEARANCE_DAY) {
+            setAppearance(VaultRepository.APPEARANCE_DAY)
+        }, matchWrap().apply { bottomMargin = dp(8) })
+        content.addView(settingsRow("夜间模式", "深色工作区与深色编辑纸面", appearance == VaultRepository.APPEARANCE_NIGHT) {
+            setAppearance(VaultRepository.APPEARANCE_NIGHT)
+        }, matchWrap())
+        sectionLabel(content, "每日笔记", 0)
+        val path = repository.dailyNoteDirectoryPath().ifBlank { "Vault 根目录" }
+        content.addView(settingsRow("今日笔记目录", path, false) { showDailyFolderPicker(true) }, matchWrap())
+        content.addView(TextView(this).apply {
+            text = "设置不会移动已有笔记或附件。新建的每日笔记会按 yyyy-MM-dd.md 写入所选目录。"
+            textSize = 13f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(dp(6), dp(12), dp(6), 0)
+        }, matchWrap())
+        scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private fun setAppearance(mode: String) {
+        repository.setAppearanceMode(mode)
+        applyWindowColors()
+        showSettings()
+    }
+
+    private fun showDailyFolderPicker(reset: Boolean = false) {
+        val rootDirectory = repository.vaultRoot() ?: run {
+            toast("无法访问 Vault，请重新选择")
+            return
+        }
+        if (reset || dailyFolderDirectory == null) {
+            dailyFolderDirectory = rootDirectory
+            dailyFolderPath.clear()
+            dailyFolderHistory.clear()
+        }
+        val directory = dailyFolderDirectory ?: rootDirectory
+        screen = Screen.DAILY_FOLDER_PICKER
+        val root = pageRoot(COLOR_BACKGROUND)
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(8))
+            background = colorBlock(COLOR_SURFACE)
+            addView(action("‹  设置", false) { showSettings() })
+            addView(TextView(this@MainActivity).apply {
+                text = "选择今日笔记目录"
+                textSize = 17f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_PRIMARY_TEXT)
+                maxLines = 1
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            addView(action("使用此目录", true) { confirmDailyFolder() })
+        }
+        root.addView(toolbar, matchWrap())
+        root.addView(TextView(this).apply {
+            text = if (dailyFolderPath.isEmpty()) "Vault 根目录" else dailyFolderPath.joinToString(" / ")
+            textSize = 13f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }, matchWrap())
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), dp(24))
+        }
+        if (dailyFolderPath.isNotEmpty()) {
+            content.addView(action("‹  上一级", false) { showDailyFolderParent() }, wrapWrap().apply {
+                bottomMargin = dp(8)
+            })
+        }
+        val folders = repository.children(directory)
+            .filter { repository.isDirectory(it) && !isInternalDocument(it) }
+            .sortedBy { it.name.lowercase() }
+        sectionLabel(content, "文件夹", folders.size)
+        if (folders.isEmpty()) {
+            content.addView(emptyState("当前目录没有可选子文件夹"), matchWrap())
+        } else {
+            folders.forEach { folder ->
+                content.addView(vaultRow("▸", folder.name, "文件夹") { openDailyFolder(folder) }, matchWrap().apply {
+                    bottomMargin = dp(8)
+                })
+            }
+        }
+        scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private fun openDailyFolder(folder: VaultDocument) {
+        dailyFolderDirectory?.let { dailyFolderHistory.add(it) }
+        dailyFolderPath.add(folder.name)
+        dailyFolderDirectory = folder
+        showDailyFolderPicker()
+    }
+
+    private fun showDailyFolderParent() {
+        if (dailyFolderHistory.isEmpty()) return
+        dailyFolderDirectory = dailyFolderHistory.removeAt(dailyFolderHistory.lastIndex)
+        if (dailyFolderPath.isNotEmpty()) dailyFolderPath.removeAt(dailyFolderPath.lastIndex)
+        showDailyFolderPicker()
+    }
+
+    private fun confirmDailyFolder() {
+        repository.setDailyNoteDirectory(dailyFolderPath)
+        showSettings()
     }
 
     private fun openDirectory(directory: VaultDocument) {
@@ -285,7 +425,7 @@ class MainActivity : Activity() {
         root.addView(webView, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         val content = repository.readText(note) ?: "# ${note.name.removeSuffix(".md")}\n\n"
-        webView.loadDataWithBaseURL(null, MarkdownCodec.toHtml(content, repository), "text/html", "UTF-8", null)
+        webView.loadDataWithBaseURL(null, MarkdownCodec.toHtml(content, repository, isNightTheme()), "text/html", "UTF-8", null)
     }
 
     private fun returnToBrowser() {
@@ -324,7 +464,7 @@ class MainActivity : Activity() {
                 statusView.text = "保存失败 · 请检查 Vault 权限"
             }
             if (success && extra != null) {
-                webView.loadDataWithBaseURL(null, MarkdownCodec.toHtml(content, repository), "text/html", "UTF-8", null)
+                webView.loadDataWithBaseURL(null, MarkdownCodec.toHtml(content, repository, isNightTheme()), "text/html", "UTF-8", null)
             }
             val nextExtra = queuedExtra
             val nextCompletion = queuedCompletion
@@ -460,7 +600,7 @@ class MainActivity : Activity() {
             restoreEditorScreen()
             return
         }
-        val imageLink = "![${attachments.corrected}](../${attachments.relativeDirectory}/${attachments.corrected})"
+        val imageLink = "![${attachments.corrected}](${repository.relativeAttachmentPath(note, attachments)})"
         val content = repository.readText(note).orEmpty().trimEnd() + "\n\n$imageLink\n"
         val success = repository.saveText(note, content)
         if (success) {
@@ -573,6 +713,39 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(dp(28), dp(44)))
     }
 
+    private fun settingsRow(title: String, subtitle: String, selected: Boolean, action: () -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(68)
+        setPadding(dp(16), dp(10), dp(12), dp(10))
+        background = rounded(COLOR_ROW, dp(14))
+        isClickable = true
+        isFocusable = true
+        contentDescription = "$title，$subtitle"
+        setOnClickListener { action() }
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 16f
+                setTextColor(COLOR_PRIMARY_TEXT)
+            }, matchWrap())
+            addView(TextView(this@MainActivity).apply {
+                text = subtitle
+                textSize = 13f
+                maxLines = 1
+                setTextColor(COLOR_MUTED_TEXT)
+                setPadding(0, dp(3), 0, 0)
+            }, matchWrap())
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(TextView(this@MainActivity).apply {
+            text = if (selected) "已启用  ✓" else "›"
+            textSize = if (selected) 13f else 26f
+            gravity = Gravity.CENTER
+            setTextColor(if (selected) COLOR_ACCENT else COLOR_MUTED_TEXT)
+        }, LinearLayout.LayoutParams(dp(72), dp(44)))
+    }
+
     private fun emptyState(message: String): View = TextView(this).apply {
         text = message
         textSize = 14f
@@ -597,7 +770,7 @@ class MainActivity : Activity() {
         gravity = Gravity.CENTER
         minimumHeight = dp(44)
         setPadding(dp(12), 0, dp(12), 0)
-        setTextColor(if (primary) COLOR_BACKGROUND else COLOR_PRIMARY_TEXT)
+        setTextColor(if (primary) COLOR_ON_ACCENT else COLOR_PRIMARY_TEXT)
         background = rounded(if (primary) COLOR_ACCENT else COLOR_ROW, dp(12))
         isClickable = true
         isFocusable = true
@@ -651,7 +824,33 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private enum class Screen { WELCOME, BROWSER, EDITOR, PHOTO }
+    private fun isNightTheme(): Boolean = repository.appearanceMode() == VaultRepository.APPEARANCE_NIGHT
+
+    private fun applyWindowColors() {
+        window.statusBarColor = COLOR_SURFACE
+        window.navigationBarColor = COLOR_SURFACE
+    }
+
+    private val COLOR_BACKGROUND: Int
+        get() = if (isNightTheme()) Color.rgb(18, 22, 28) else Color.rgb(245, 245, 248)
+    private val COLOR_SURFACE: Int
+        get() = if (isNightTheme()) Color.rgb(27, 32, 40) else Color.WHITE
+    private val COLOR_ROW: Int
+        get() = if (isNightTheme()) Color.rgb(37, 44, 54) else Color.rgb(232, 232, 238)
+    private val COLOR_EDITOR_BACKGROUND: Int
+        get() = if (isNightTheme()) Color.rgb(29, 33, 40) else Color.rgb(250, 250, 248)
+    private val COLOR_ACCENT: Int
+        get() = if (isNightTheme()) Color.rgb(174, 146, 255) else Color.rgb(103, 80, 164)
+    private val COLOR_PRIMARY_TEXT: Int
+        get() = if (isNightTheme()) Color.rgb(239, 242, 247) else Color.rgb(28, 28, 33)
+    private val COLOR_SECONDARY_TEXT: Int
+        get() = if (isNightTheme()) Color.rgb(193, 201, 211) else Color.rgb(82, 82, 92)
+    private val COLOR_MUTED_TEXT: Int
+        get() = if (isNightTheme()) Color.rgb(148, 160, 174) else Color.rgb(112, 112, 124)
+    private val COLOR_ON_ACCENT: Int
+        get() = Color.WHITE
+
+    private enum class Screen { WELCOME, BROWSER, EDITOR, PHOTO, SETTINGS, DAILY_FOLDER_PICKER }
 
     companion object {
         private const val CAMERA_PERMISSION_REQUEST = 1001
@@ -660,13 +859,5 @@ class MainActivity : Activity() {
         private const val FILE_PROVIDER_AUTHORITY = "com.markbook.android.fileprovider"
         private const val MAX_PREVIEW_SIDE = 4096
         private val AUTOSAVE_TOKEN = Any()
-        private val COLOR_BACKGROUND = Color.rgb(18, 22, 28)
-        private val COLOR_SURFACE = Color.rgb(27, 32, 40)
-        private val COLOR_ROW = Color.rgb(37, 44, 54)
-        private val COLOR_EDITOR_BACKGROUND = Color.rgb(250, 250, 248)
-        private val COLOR_ACCENT = Color.rgb(150, 112, 255)
-        private val COLOR_PRIMARY_TEXT = Color.rgb(239, 242, 247)
-        private val COLOR_SECONDARY_TEXT = Color.rgb(193, 201, 211)
-        private val COLOR_MUTED_TEXT = Color.rgb(148, 160, 174)
     }
 }
