@@ -20,6 +20,11 @@
   T509 跟踪。
 - [x] T519 提供设置页的日间/夜间显示模式和 Vault 内每日笔记目录选择。
 - [x] T520 根据每日笔记目录深度生成到 `assets/` 的相对 Markdown 图片链接。
+- [x] T521 让照片处理页首次进入即显示默认选区，并为矩形与四点校正提供可访问的明确选中态。
+- [x] T522 保持照片处理的笔记上下文；成功后在原光标位置插入链接并恢复原阅读位置。
+- [x] T523 在照片写入和失败恢复期间提供持续状态、禁用重复插入并保留重试路径。
+- [x] T524 在编辑器中展示 Vault/目录上下文，并统一关键反馈的产品视觉语义。
+- [x] T525 整理文件库底部操作区，并区分空目录与当前 Vault/目录不可访问状态。
 
 ## 拍照闭环
 
@@ -35,5 +40,5 @@
 - [ ] T515 在 Mate 60 验证竖横屏、字体缩放、重启和连续拍照。
 - [ ] T516 输出可安装 APK、版本号、构建记录和真机验收结果。
 
-本机已验证 `android/gradlew --offline --no-daemon assembleDebug` 成功，产物为
+本机已验证共享 Vault 契约检查与 `android/gradlew --offline --no-daemon assembleDebug` 成功，产物为
 `android/app/build/outputs/apk/debug/app-debug.apk`；Mate 60 真机安装与验收仍未完成。

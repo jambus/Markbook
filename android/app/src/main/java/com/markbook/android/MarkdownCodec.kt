@@ -5,6 +5,8 @@ import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 object MarkdownCodec {
+    const val CARET_MARKER = "<!--MARKBOOK_CARET-->"
+
     fun toHtml(markdown: String, repository: VaultRepository, nightMode: Boolean = false): String {
         val body = StringBuilder()
         val lines = markdown.replace("\r\n", "\n").split('\n')
@@ -35,10 +37,10 @@ object MarkdownCodec {
             }
         }
         if (inList) body.append("</ul>")
-        val background = if (nightMode) "#1d2128" else "#fafaf8"
-        val text = if (nightMode) "#edf0f5" else "#252932"
-        val heading = if (nightMode) "#ffffff" else "#181b21"
-        val caret = if (nightMode) "#ae92ff" else "#6750a4"
+        val background = if (nightMode) "#18231e" else "#f7f7f2"
+        val text = if (nightMode) "#eff6f1" else "#18201c"
+        val heading = if (nightMode) "#ffffff" else "#18201c"
+        val caret = if (nightMode) "#8dcfa8" else "#2f6b4f"
         return """
             <!doctype html>
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -54,6 +56,7 @@ object MarkdownCodec {
                 if (node.nodeType !== Node.ELEMENT_NODE) return '';
                 var tag=node.tagName.toLowerCase(), out='';
                 if (tag==='img') return '!['+(node.alt||'image')+']('+(node.getAttribute('data-markdown')||'')+')\n';
+                if (tag==='span' && node.getAttribute('data-markbook-caret') === 'true') return '$CARET_MARKER';
                 for (var i=0;i<node.childNodes.length;i++) out += md(node.childNodes[i]);
                 if (tag==='h1') return '# '+out.trim()+'\n\n';
                 if (tag==='h2') return '## '+out.trim()+'\n\n';
@@ -68,7 +71,32 @@ object MarkdownCodec {
                 return out;
               }
               var editor=document.getElementById('editor');
-              window.markbook={serialize:function(){return md(editor).replace(/\n{3,}/g,'\n\n').trim()+'\n'} };
+              function serialize() { return md(editor).replace(/\n{3,}/g,'\n\n').trim()+'\n'; }
+              window.markbook={
+                serialize:serialize,
+                serializeWithCaret:function(){
+                  var selection=window.getSelection();
+                  if(!selection || !selection.rangeCount || !editor.contains(selection.getRangeAt(0).commonAncestorContainer)) return serialize();
+                  var range=selection.getRangeAt(0).cloneRange();
+                  range.collapse(false);
+                  var marker=document.createElement('span');
+                  marker.setAttribute('data-markbook-caret','true');
+                  range.insertNode(marker);
+                  var value=serialize();
+                  marker.remove();
+                  return value;
+                },
+                focusAfterImage:function(path){
+                  var images=editor.querySelectorAll('img[data-markdown]');
+                  for(var i=0;i<images.length;i++){
+                    if(images[i].getAttribute('data-markdown')!==path) continue;
+                    var range=document.createRange(), selection=window.getSelection();
+                    range.setStartAfter(images[i]); range.collapse(true);
+                    selection.removeAllRanges(); selection.addRange(range); editor.focus(); return true;
+                  }
+                  return false;
+                }
+              };
               editor.addEventListener('input',function(){ if(window.Android) Android.onChanged(); });
             })();
             </script></html>

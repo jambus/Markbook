@@ -11,6 +11,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -43,6 +44,14 @@ class MainActivity : Activity() {
     private var captureFile: File? = null
     private var captureUri: Uri? = null
     private var editorView: PhotoEditorView? = null
+    private var photoStatusView: TextView? = null
+    private var photoInsertAction: TextView? = null
+    private var photoModeActions: List<TextView> = emptyList()
+    private var photoSavePending = false
+    private var photoContextContent: String? = null
+    private var photoContextScrollY = 0
+    private var pendingEditorScrollY: Int? = null
+    private var pendingCaretImagePath: String? = null
     private var savePending = false
     private var queuedExtra: String? = null
     private var queuedCompletion: ((Boolean) -> Unit)? = null
@@ -155,35 +164,40 @@ class MainActivity : Activity() {
                 bottomMargin = dp(8)
             })
         }
+        val directoryReadable = repository.canReadDirectory(directory)
         val children = repository.children(directory)
             .filterNot { isInternalDocument(it) }
             .sortedWith(compareBy<VaultDocument> { !repository.isDirectory(it) }.thenBy { it.name.lowercase() })
         val folders = children.filter { repository.isDirectory(it) }
         val notes = children.filter { !repository.isDirectory(it) && it.name.endsWith(".md", true) }
 
-        sectionLabel(content, "文件夹", folders.size)
-        if (folders.isEmpty()) {
-            content.addView(emptyState("当前目录没有文件夹"), matchWrap().apply { bottomMargin = dp(16) })
+        if (!directoryReadable) {
+            content.addView(vaultAccessErrorState(), matchWrap())
         } else {
-            folders.forEach { folder ->
-                content.addView(vaultRow("▸", folder.name, "文件夹") { openDirectory(folder) }, matchWrap().apply {
-                    bottomMargin = dp(8)
-                })
+            sectionLabel(content, "文件夹", folders.size)
+            if (folders.isEmpty()) {
+                content.addView(emptyState("当前目录没有文件夹"), matchWrap().apply { bottomMargin = dp(16) })
+            } else {
+                folders.forEach { folder ->
+                    content.addView(vaultRow("▸", folder.name, "文件夹") { openDirectory(folder) }, matchWrap().apply {
+                        bottomMargin = dp(8)
+                    })
+                }
             }
-        }
-        sectionLabel(content, "笔记", notes.size)
-        if (notes.isEmpty()) {
-            content.addView(emptyState("当前目录还没有 Markdown 笔记"), matchWrap())
-        } else {
-            notes.forEach { note ->
-                content.addView(vaultRow("•", note.name.removeSuffix(".md"), notePreview(note)) { openNote(note) }, matchWrap().apply {
-                    bottomMargin = dp(8)
-                })
+            sectionLabel(content, "笔记", notes.size)
+            if (notes.isEmpty()) {
+                content.addView(emptyState("当前目录还没有 Markdown 笔记"), matchWrap())
+            } else {
+                notes.forEach { note ->
+                    content.addView(vaultRow("•", note.name.removeSuffix(".md"), notePreview(note)) { openNote(note) }, matchWrap().apply {
+                        bottomMargin = dp(8)
+                    })
+                }
             }
         }
         scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(browserFooter(), matchWrap())
+        if (directoryReadable) root.addView(browserFooter(), matchWrap())
         setContentView(root)
         scroll.post { scroll.scrollTo(0, browserScrollY) }
     }
@@ -204,18 +218,9 @@ class MainActivity : Activity() {
     }
 
     private fun browserFooter(): View = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(16), dp(10), dp(16), dp(16))
         background = colorBlock(COLOR_SURFACE)
-        addView(TextView(this@MainActivity).apply {
-            text = "文件"
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setTextColor(COLOR_ACCENT)
-        }, LinearLayout.LayoutParams(0, dp(48), 0.34f))
-        addView(action("打开今日笔记", true) { openDailyNote() }, LinearLayout.LayoutParams(0, dp(48), 0.66f))
+        addView(action("打开今日笔记", true) { openDailyNote() }, LinearLayout.LayoutParams(-1, dp(48)))
     }
 
     private fun showSettings() {
@@ -404,14 +409,22 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(0, dp(44), 1f))
         toolbar.addView(action("拍照", false) { startCamera() })
         toolbar.addView(action("保存", true) { saveCurrentNote() })
+        root.addView(toolbar, matchWrap())
+        root.addView(TextView(this).apply {
+            text = editorContext(note)
+            textSize = 12f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(dp(20), dp(7), dp(20), dp(2))
+            background = colorBlock(COLOR_SURFACE)
+            maxLines = 1
+        }, matchWrap())
         statusView = TextView(this).apply {
             text = "已保存"
             textSize = 13f
             setTextColor(COLOR_SECONDARY_TEXT)
-            setPadding(dp(20), dp(7), dp(20), dp(9))
+            setPadding(dp(20), dp(2), dp(20), dp(9))
             background = colorBlock(COLOR_SURFACE)
         }
-        root.addView(toolbar, matchWrap())
         root.addView(statusView, matchWrap())
         webView = WebView(this).apply {
             setBackgroundColor(COLOR_EDITOR_BACKGROUND)
@@ -489,7 +502,21 @@ class MainActivity : Activity() {
                 toast("请先保存笔记，再拍照")
                 return@saveCurrentNote
             }
-            launchCamera()
+            capturePhotoContext { launchCamera() }
+        }
+    }
+
+    private fun capturePhotoContext(onReady: () -> Unit) {
+        if (!::webView.isInitialized) {
+            onReady()
+            return
+        }
+        photoContextScrollY = webView.scrollY
+        webView.evaluateJavascript(
+            "window.markbook && window.markbook.serializeWithCaret ? window.markbook.serializeWithCaret() : ''"
+        ) { value ->
+            photoContextContent = decodeJavascriptString(value).ifBlank { null }
+            onReady()
         }
     }
 
@@ -565,70 +592,172 @@ class MainActivity : Activity() {
 
     private fun showPhotoEditor(bitmap: Bitmap) {
         screen = Screen.PHOTO
+        photoSavePending = false
         val root = pageRoot(Color.BLACK)
-        val controls = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(6), dp(8), dp(6), dp(8))
+        val header = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(6))
         }
         val view = PhotoEditorView(this, bitmap)
         editorView = view
-        controls.addView(action("矩形", false) { view.mode = PhotoEditMode.RECTANGLE })
-        controls.addView(action("四点校正", false) { view.mode = PhotoEditMode.PERSPECTIVE })
-        controls.addView(action("取消", false) { restoreEditorScreen() })
-        controls.addView(action("插入", true) { commitPhoto(bitmap, view) })
-        root.addView(controls, matchWrap())
+        header.addView(action("取消", false) { if (!photoSavePending) restoreEditorScreen() })
+        header.addView(TextView(this).apply {
+            text = "调整照片"
+            textSize = 18f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        photoInsertAction = action("插入照片", true) { commitPhoto(bitmap, view) }
+        header.addView(photoInsertAction)
+        photoStatusView = TextView(this).apply {
+            text = "拖动四个角点调整裁剪范围"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(20), dp(2), dp(20), dp(10))
+        }
+        val modes = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(16), 0, dp(16), dp(10))
+        }
+        val rectangleAction = action("矩形裁剪", false) { setPhotoMode(view, PhotoEditMode.RECTANGLE) }
+        val perspectiveAction = action("四点校正", false) { setPhotoMode(view, PhotoEditMode.PERSPECTIVE) }
+        photoModeActions = listOf(rectangleAction, perspectiveAction)
+        modes.addView(rectangleAction, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(8) })
+        modes.addView(perspectiveAction, LinearLayout.LayoutParams(0, dp(44), 1f))
+        setPhotoMode(view, PhotoEditMode.RECTANGLE)
+        root.addView(header, matchWrap())
+        root.addView(photoStatusView, matchWrap())
+        root.addView(modes, matchWrap())
         root.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
     }
 
     private fun commitPhoto(bitmap: Bitmap, view: PhotoEditorView) {
-        val input = captureFile?.let { FileInputStream(it) }
-        if (input == null) {
-            restoreEditorScreen()
+        if (photoSavePending) return
+        val capture = captureFile
+        val note = currentNote
+        if (capture == null || note == null) {
+            photoStatusView?.text = "照片已不可用，请返回笔记后重新拍摄"
             return
         }
-        val corrected = view.outputJpeg()
-        val noteName = currentNote?.name
-        val attachments = if (noteName == null) null else input.use { repository.savePhotoPair(noteName, it, corrected) }
-        if (attachments == null) {
-            toast("照片保存失败，请检查 Vault 空间或权限")
-            restoreEditorScreen()
+        photoSavePending = true
+        photoInsertAction?.isEnabled = false
+        photoModeActions.forEach { it.isEnabled = false }
+        photoStatusView?.text = "正在写入原图、校正图和笔记…"
+        val corrected = try {
+            view.outputJpeg()
+        } catch (_: Exception) {
+            showPhotoSaveFailure("无法处理照片，请调整后重试")
             return
         }
-        val note = currentNote ?: run {
-            repository.rollbackPhotoPair(attachments)
-            restoreEditorScreen()
-            return
-        }
-        val imageLink = "![${attachments.corrected}](${repository.relativeAttachmentPath(note, attachments)})"
-        val content = repository.readText(note).orEmpty().trimEnd() + "\n\n$imageLink\n"
-        val success = repository.saveText(note, content)
-        if (success) {
-            currentNote = repository.refreshDocument(note) ?: note
-            repository.confirmPhotoPair(attachments)
-        } else {
-            repository.rollbackPhotoPair(attachments)
-            toast("无法更新笔记，照片尚未插入")
-        }
-        if (!bitmap.isRecycled) bitmap.recycle()
-        discardCaptureFile()
-        editorView = null
-        if (success) {
-            showEditor(currentNote ?: note)
-            statusView.text = "照片已插入并保存"
-        } else {
-            restoreEditorScreen()
-        }
+        Thread {
+            val attachments = try {
+                FileInputStream(capture).use { repository.savePhotoPair(note.name, it, corrected) }
+            } catch (_: Exception) {
+                null
+            }
+            if (attachments == null) {
+                runOnUiThread { showPhotoSaveFailure("照片尚未插入，请检查 Vault 权限或存储空间后重试") }
+                return@Thread
+            }
+            val relativePath = repository.relativeAttachmentPath(note, attachments)
+            val imageLink = "![${attachments.corrected}]($relativePath)"
+            val content = insertPhotoAtCapturePoint(
+                photoContextContent ?: repository.readText(note).orEmpty(),
+                imageLink
+            )
+            val success = repository.saveText(note, content)
+            if (success) {
+                currentNote = repository.refreshDocument(note) ?: note
+                repository.confirmPhotoPair(attachments)
+                runOnUiThread {
+                    pendingEditorScrollY = photoContextScrollY
+                    pendingCaretImagePath = relativePath
+                    photoContextContent = null
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                    discardCaptureFile()
+                    editorView = null
+                    photoStatusView = null
+                    photoInsertAction = null
+                    photoModeActions = emptyList()
+                    photoSavePending = false
+                    showEditor(currentNote ?: note)
+                    statusView.text = "照片已插入并保存"
+                }
+            } else {
+                repository.rollbackPhotoPair(attachments)
+                runOnUiThread { showPhotoSaveFailure("无法更新笔记，照片尚未插入；可重试或返回笔记") }
+            }
+        }.start()
     }
 
     private fun restoreEditorScreen() {
+        if (photoSavePending) return
         discardCaptureFile()
         editorView = null
+        pendingEditorScrollY = photoContextScrollY
+        photoContextContent = null
+        photoStatusView = null
+        photoInsertAction = null
+        photoModeActions = emptyList()
         val note = currentNote
         if (note == null) showVaultBrowser() else showEditor(note)
     }
 
+    private fun setPhotoMode(view: PhotoEditorView, mode: PhotoEditMode) {
+        if (photoSavePending) return
+        view.mode = mode
+        photoStatusView?.text = if (mode == PhotoEditMode.RECTANGLE) {
+            "矩形裁剪：拖动任一角点调整范围"
+        } else {
+            "四点校正：分别拖动四个角点拉直画面"
+        }
+        photoModeActions.forEachIndexed { index, action ->
+            val selected = (index == 0 && mode == PhotoEditMode.RECTANGLE) ||
+                (index == 1 && mode == PhotoEditMode.PERSPECTIVE)
+            action.isSelected = selected
+            action.contentDescription = if (selected) "${action.text}，已选中" else action.text
+            action.setTextColor(if (selected) COLOR_ON_ACCENT else COLOR_PRIMARY_TEXT)
+            action.background = rounded(if (selected) COLOR_ACCENT else COLOR_ROW, dp(12))
+        }
+    }
+
+    private fun showPhotoSaveFailure(message: String) {
+        photoSavePending = false
+        photoInsertAction?.isEnabled = true
+        photoModeActions.forEach { it.isEnabled = true }
+        photoStatusView?.text = message
+    }
+
+    private fun insertPhotoAtCapturePoint(base: String, imageLink: String): String {
+        val insertion = "\n\n$imageLink\n\n"
+        return if (base.contains(MarkdownCodec.CARET_MARKER)) {
+            base.replace(MarkdownCodec.CARET_MARKER, insertion).trimEnd() + "\n"
+        } else {
+            base.trimEnd() + insertion
+        }
+    }
+
     private fun attachmentClient(): WebViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            val scrollY = pendingEditorScrollY
+            val imagePath = pendingCaretImagePath
+            pendingEditorScrollY = null
+            pendingCaretImagePath = null
+            view?.post {
+                if (scrollY != null) view.scrollTo(0, scrollY)
+                if (imagePath != null) {
+                    view.evaluateJavascript(
+                        "window.markbook && window.markbook.focusAfterImage(${org.json.JSONObject.quote(imagePath)})",
+                        null
+                    )
+                }
+            }
+        }
+
         override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?): WebResourceResponse? {
             val uri = request?.url ?: return super.shouldInterceptRequest(view, request)
             if (uri.scheme != "markbook" || uri.host != "attachment") return super.shouldInterceptRequest(view, request)
@@ -670,6 +799,35 @@ class MainActivity : Activity() {
             setTextColor(COLOR_MUTED_TEXT)
             setPadding(dp(4), dp(14), dp(4), dp(8))
         }, matchWrap())
+    }
+
+    private fun vaultAccessErrorState(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(18), dp(18), dp(16))
+        background = rounded(COLOR_ROW, dp(14))
+        addView(TextView(this@MainActivity).apply {
+            text = "无法读取当前 Vault"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(COLOR_PRIMARY_TEXT)
+        }, matchWrap())
+        addView(TextView(this@MainActivity).apply {
+            text = "文件没有被移动。请重新授予目录访问权限后再继续。"
+            textSize = 13f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(0, dp(6), 0, dp(14))
+        }, matchWrap())
+        addView(action("重新选择 Vault", true) { chooseVault() }, wrapWrap())
+    }
+
+    private fun editorContext(note: VaultDocument): String {
+        val vault = repository.vaultRoot()?.name ?: "Vault"
+        val location = when {
+            browserPath.isNotEmpty() -> browserPath.joinToString(" / ")
+            repository.dailyNoteDirectoryPath().isNotBlank() -> repository.dailyNoteDirectoryPath()
+            else -> "Vault 根目录"
+        }
+        return "$vault · $location · ${note.name}"
     }
 
     private fun vaultRow(icon: String, title: String, subtitle: String, action: () -> Unit): View = LinearLayout(this).apply {
@@ -829,24 +987,32 @@ class MainActivity : Activity() {
     private fun applyWindowColors() {
         window.statusBarColor = COLOR_SURFACE
         window.navigationBarColor = COLOR_SURFACE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val lightFlags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            window.decorView.systemUiVisibility = if (isNightTheme()) {
+                window.decorView.systemUiVisibility and lightFlags.inv()
+            } else {
+                window.decorView.systemUiVisibility or lightFlags
+            }
+        }
     }
 
     private val COLOR_BACKGROUND: Int
-        get() = if (isNightTheme()) Color.rgb(18, 22, 28) else Color.rgb(245, 245, 248)
+        get() = if (isNightTheme()) Color.rgb(18, 28, 24) else Color.rgb(247, 247, 242)
     private val COLOR_SURFACE: Int
-        get() = if (isNightTheme()) Color.rgb(27, 32, 40) else Color.WHITE
+        get() = if (isNightTheme()) Color.rgb(27, 38, 33) else Color.WHITE
     private val COLOR_ROW: Int
-        get() = if (isNightTheme()) Color.rgb(37, 44, 54) else Color.rgb(232, 232, 238)
+        get() = if (isNightTheme()) Color.rgb(40, 54, 47) else Color.rgb(237, 241, 237)
     private val COLOR_EDITOR_BACKGROUND: Int
-        get() = if (isNightTheme()) Color.rgb(29, 33, 40) else Color.rgb(250, 250, 248)
+        get() = if (isNightTheme()) Color.rgb(24, 35, 30) else Color.rgb(247, 247, 242)
     private val COLOR_ACCENT: Int
-        get() = if (isNightTheme()) Color.rgb(174, 146, 255) else Color.rgb(103, 80, 164)
+        get() = if (isNightTheme()) Color.rgb(141, 207, 168) else Color.rgb(47, 107, 79)
     private val COLOR_PRIMARY_TEXT: Int
-        get() = if (isNightTheme()) Color.rgb(239, 242, 247) else Color.rgb(28, 28, 33)
+        get() = if (isNightTheme()) Color.rgb(239, 246, 241) else Color.rgb(24, 32, 28)
     private val COLOR_SECONDARY_TEXT: Int
-        get() = if (isNightTheme()) Color.rgb(193, 201, 211) else Color.rgb(82, 82, 92)
+        get() = if (isNightTheme()) Color.rgb(195, 211, 201) else Color.rgb(70, 81, 75)
     private val COLOR_MUTED_TEXT: Int
-        get() = if (isNightTheme()) Color.rgb(148, 160, 174) else Color.rgb(112, 112, 124)
+        get() = if (isNightTheme()) Color.rgb(158, 178, 166) else Color.rgb(102, 113, 107)
     private val COLOR_ON_ACCENT: Int
         get() = Color.WHITE
 

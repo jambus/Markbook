@@ -38,7 +38,7 @@ class PhotoEditorView(context: android.content.Context, private val bitmap: Bitm
     )
     private val imageRect = RectF()
     private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(21, 101, 192) }
+    private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(216, 87, 60) }
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE
@@ -46,7 +46,7 @@ class PhotoEditorView(context: android.content.Context, private val bitmap: Bitm
     }
     private val dimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(118, 0, 0, 0) }
     private var activeHandle = -1
-    private var selectionVisible = false
+    private var selectionVisible = true
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)

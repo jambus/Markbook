@@ -94,6 +94,22 @@ class VaultRepository(private val context: Context) {
         return listChildren(tree, directory.uri)
     }
 
+    fun canReadDirectory(directory: VaultDocument): Boolean {
+        val tree = savedVaultUri() ?: return false
+        val parentId = try {
+            DocumentsContract.getDocumentId(directory.uri)
+        } catch (_: Exception) {
+            return false
+        }
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+        return try {
+            resolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)
+                ?.use { true } ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun isDirectory(document: VaultDocument): Boolean =
         document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR
 
