@@ -15,8 +15,10 @@ filesystem or sync logic in `services/`. Resources are grouped under
 Keep Markdown files and image attachments as the source of truth. Do not add a
 database dependency for data that can be derived from the notebook directory.
 Both clients must preserve identical Vault paths and relative Markdown links.
-Numbered specs live in `doc/specs/`; update `spec.md`, `plan.md`, and `tasks.md`
-before changing scope.
+All project documentation lives under `docs/`: `constitution.md` and `product/`
+hold the governing rules and roadmap, `specs/` holds numbered capability specs,
+and `design/` holds the cross-client experience baseline. Numbered specs live in
+`docs/specs/`; update `spec.md`, `plan.md`, and `tasks.md` before changing scope.
 
 ## Design Knowledge Base
 

@@ -17,7 +17,7 @@ Markbook/
 │   └── app/src/
 ├── entry/                    # HarmonyOS 5/6 HAP，ArkTS/Hvigor
 ├── shared-testdata/          # 两端共同读取的 Markdown 与图片样例
-└── doc/specs/                # 产品规格、计划和任务
+└── docs/specs/               # 产品规格、计划和任务
 ```
 
 ## Platform Boundaries

@@ -4,7 +4,7 @@
 
 - 设计知识库以仓库内 Markdown 维护，路径为 `docs/design/`。
 - 文档面向 Android APK 与 HarmonyOS HAP，描述行为和状态，不绑定特定 UI 框架。
-- `doc/specs/004-harmony-4-5-compatibility/contracts/vault-contract.md` 是文件格式与事务语义的唯一契约来源；设计文档只引用和呈现这些约束。
+- `docs/specs/004-harmony-4-5-compatibility/contracts/vault-contract.md` 是文件格式与事务语义的唯一契约来源；设计文档只引用和呈现这些约束。
 - Apple Human Interface Guidelines 是导航层级、上下文保留和动效目的性的参考来源；具体控件与手势仍优先采用目标平台约定。
 
 ## Delivery Phases

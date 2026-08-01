@@ -163,6 +163,25 @@ class VaultRepository(private val context: Context) {
         null
     }
 
+    /**
+     * Reads at most [maxBytes] from a note. List rows only need the opening lines, so they must not
+     * pay for reading an entire document.
+     */
+    fun readPreview(document: VaultDocument, maxBytes: Int): String? = try {
+        resolver.openInputStream(document.uri)?.use { stream ->
+            val buffer = ByteArray(maxBytes)
+            var read = 0
+            while (read < maxBytes) {
+                val count = stream.read(buffer, read, maxBytes - read)
+                if (count <= 0) break
+                read += count
+            }
+            String(buffer, 0, read, StandardCharsets.UTF_8)
+        }
+    } catch (_: Exception) {
+        null
+    }
+
     fun saveText(document: VaultDocument, content: String): Boolean {
         val parent = document.parentUri ?: return false
         val tempName = ".markbook-${UUID.randomUUID()}.tmp"

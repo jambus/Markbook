@@ -4,7 +4,7 @@
 
 此流程让用户从当前笔记快速拍照、按需裁剪或校正后插入。系统相机负责拍摄；Markbook 负责把结果安全写入用户 Vault，并插入相对 Markdown 链接。首版不含 OCR、标注、视频、音频或云端识别。
 
-附件路径、命名、原图保留与事务恢复以 [共享 Vault 契约](../../doc/specs/004-harmony-4-5-compatibility/contracts/vault-contract.md) 和 [拍照附件规格](../../doc/specs/002-camera-attachments/spec.md) 为准。本文不允许为方便预览而把临时 URI 或设备绝对路径写入 Markdown。
+附件路径、命名、原图保留与事务恢复以 [共享 Vault 契约](../specs/004-harmony-4-5-compatibility/contracts/vault-contract.md) 和 [拍照附件规格](../specs/002-camera-attachments/spec.md) 为准。本文不允许为方便预览而把临时 URI 或设备绝对路径写入 Markdown。
 
 ## 用户流程
 

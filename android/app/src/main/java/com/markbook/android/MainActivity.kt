@@ -30,9 +30,11 @@ import java.util.UUID
 
 class MainActivity : Activity() {
     private lateinit var repository: VaultRepository
-    private lateinit var webView: WebView
-    private lateinit var statusView: TextView
+    private var webView: WebView? = null
+    private var statusView: TextView? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val autosave = Runnable { saveCurrentNote() }
+    private var documentDirty = false
     private var currentNote: VaultDocument? = null
     private var browserDirectory: VaultDocument? = null
     private val browserPath = mutableListOf<String>()
@@ -54,7 +56,7 @@ class MainActivity : Activity() {
     private var pendingCaretImagePath: String? = null
     private var savePending = false
     private var queuedExtra: String? = null
-    private var queuedCompletion: ((Boolean) -> Unit)? = null
+    private val queuedCompletions = mutableListOf<(Boolean) -> Unit>()
     private var screen = Screen.WELCOME
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,7 +68,28 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        if (screen == Screen.EDITOR && ::webView.isInitialized) saveCurrentNote()
+        if (screen == Screen.EDITOR && webView != null) saveCurrentNote()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(autosave)
+        releaseEditor()
+        super.onDestroy()
+    }
+
+    /**
+     * Editor screens create a new WebView every time. Releasing the previous instance keeps
+     * repeated navigation from accumulating renderer processes.
+     */
+    private fun releaseEditor() {
+        val editor = webView ?: return
+        webView = null
+        statusView = null
+        savePending = false
+        handler.removeCallbacks(autosave)
+        (editor.parent as? android.view.ViewGroup)?.removeView(editor)
+        editor.stopLoading()
+        editor.destroy()
     }
 
     @Deprecated("Deprecated in Java")
@@ -84,6 +107,7 @@ class MainActivity : Activity() {
     }
 
     private fun showWelcome(message: String? = null) {
+        releaseEditor()
         screen = Screen.WELCOME
         currentNote = null
         val root = pageRoot(COLOR_BACKGROUND).apply {
@@ -140,6 +164,7 @@ class MainActivity : Activity() {
             browserScrollY = 0
         }
         val directory = browserDirectory ?: rootDirectory
+        releaseEditor()
         screen = Screen.BROWSER
         val root = pageRoot(COLOR_BACKGROUND)
         root.addView(browserHeader(), matchWrap())
@@ -224,6 +249,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSettings() {
+        releaseEditor()
         screen = Screen.SETTINGS
         val root = pageRoot(COLOR_BACKGROUND)
         val toolbar = LinearLayout(this).apply {
@@ -390,6 +416,8 @@ class MainActivity : Activity() {
     }
 
     private fun showEditor(note: VaultDocument) {
+        releaseEditor()
+        documentDirty = false
         screen = Screen.EDITOR
         val root = pageRoot(COLOR_EDITOR_BACKGROUND)
         val toolbar = LinearLayout(this).apply {
@@ -426,7 +454,7 @@ class MainActivity : Activity() {
             background = colorBlock(COLOR_SURFACE)
         }
         root.addView(statusView, matchWrap())
-        webView = WebView(this).apply {
+        val editor = WebView(this).apply {
             setBackgroundColor(COLOR_EDITOR_BACKGROUND)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -435,11 +463,15 @@ class MainActivity : Activity() {
             webViewClient = attachmentClient()
             addJavascriptInterface(EditorBridge(), "Android")
         }
-        root.addView(webView, LinearLayout.LayoutParams(-1, 0, 1f))
+        webView = editor
+        root.addView(editor, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         val content = repository.readText(note) ?: "# ${note.name.removeSuffix(".md")}\n\n"
-        webView.loadDataWithBaseURL(null, MarkdownCodec.toHtml(content, repository, isNightTheme()), "text/html", "UTF-8", null)
+        editor.loadDataWithBaseURL(null, renderNote(content), "text/html", "UTF-8", null)
     }
+
+    private fun renderNote(content: String): String =
+        MarkdownCodec.toHtml(content, repository::htmlAttachmentUrl, isNightTheme())
 
     private fun returnToBrowser() {
         saveCurrentNote { success ->
@@ -448,15 +480,21 @@ class MainActivity : Activity() {
     }
 
     private fun saveCurrentNote(extra: String? = null, onComplete: (Boolean) -> Unit = {}) {
-        if (screen != Screen.EDITOR || !::webView.isInitialized) {
+        val editor = webView
+        if (screen != Screen.EDITOR || editor == null) {
             onComplete(false)
+            return
+        }
+        // Rendering is not a reason to touch a file: never rewrite a note the user has not edited.
+        if (extra == null && !documentDirty) {
+            onComplete(true)
             return
         }
         if (savePending) {
             if (extra != null) {
                 queuedExtra = listOfNotNull(queuedExtra, extra).joinToString("\n")
             }
-            queuedCompletion = onComplete
+            queuedCompletions.add(onComplete)
             return
         }
         val note = currentNote ?: run {
@@ -464,30 +502,36 @@ class MainActivity : Activity() {
             return
         }
         savePending = true
-        statusView.text = "正在保存…"
-        webView.evaluateJavascript("window.markbook && window.markbook.serialize ? window.markbook.serialize() : ''") { value ->
+        documentDirty = false
+        handler.removeCallbacks(autosave)
+        statusView?.text = "正在保存…"
+        editor.evaluateJavascript("window.markbook && window.markbook.serialize ? window.markbook.serialize() : ''") { value ->
             savePending = false
             val base = decodeJavascriptString(value)
             val content = if (extra == null) base else base.trimEnd() + "\n\n" + extra + "\n"
             val success = repository.saveText(note, content)
             if (success) {
                 currentNote = repository.refreshDocument(note) ?: note
-                statusView.text = if (extra == null) "已保存" else "照片已插入并保存"
+                statusView?.text = if (extra == null) "已保存" else "照片已插入并保存"
             } else {
-                statusView.text = "保存失败 · 请检查 Vault 权限"
+                documentDirty = true
+                statusView?.text = "保存失败 · 请检查 Vault 权限"
             }
             if (success && extra != null) {
-                webView.loadDataWithBaseURL(null, MarkdownCodec.toHtml(content, repository, isNightTheme()), "text/html", "UTF-8", null)
+                webView?.loadDataWithBaseURL(null, renderNote(content), "text/html", "UTF-8", null)
             }
             val nextExtra = queuedExtra
-            val nextCompletion = queuedCompletion
+            val pending = queuedCompletions.toList()
             queuedExtra = null
-            queuedCompletion = null
-            if (nextExtra != null) {
-                if (success) saveCurrentNote(nextExtra, nextCompletion ?: {}) else nextCompletion?.invoke(false)
+            queuedCompletions.clear()
+            if (success && nextExtra != null) {
+                saveCurrentNote(nextExtra) { queued ->
+                    onComplete(queued)
+                    pending.forEach { it(queued) }
+                }
             } else {
                 onComplete(success)
-                nextCompletion?.invoke(success)
+                pending.forEach { it(success) }
             }
         }
     }
@@ -507,12 +551,13 @@ class MainActivity : Activity() {
     }
 
     private fun capturePhotoContext(onReady: () -> Unit) {
-        if (!::webView.isInitialized) {
+        val editor = webView
+        if (editor == null) {
             onReady()
             return
         }
-        photoContextScrollY = webView.scrollY
-        webView.evaluateJavascript(
+        photoContextScrollY = editor.scrollY
+        editor.evaluateJavascript(
             "window.markbook && window.markbook.serializeWithCaret ? window.markbook.serializeWithCaret() : ''"
         ) { value ->
             photoContextContent = decodeJavascriptString(value).ifBlank { null }
@@ -591,6 +636,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPhotoEditor(bitmap: Bitmap) {
+        releaseEditor()
         screen = Screen.PHOTO
         photoSavePending = false
         val root = pageRoot(Color.BLACK)
@@ -659,7 +705,10 @@ class MainActivity : Activity() {
                 null
             }
             if (attachments == null) {
-                runOnUiThread { showPhotoSaveFailure("照片尚未插入，请检查 Vault 权限或存储空间后重试") }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    showPhotoSaveFailure("照片尚未插入，请检查 Vault 权限或存储空间后重试")
+                }
                 return@Thread
             }
             val relativePath = repository.relativeAttachmentPath(note, attachments)
@@ -673,6 +722,7 @@ class MainActivity : Activity() {
                 currentNote = repository.refreshDocument(note) ?: note
                 repository.confirmPhotoPair(attachments)
                 runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
                     pendingEditorScrollY = photoContextScrollY
                     pendingCaretImagePath = relativePath
                     photoContextContent = null
@@ -684,11 +734,14 @@ class MainActivity : Activity() {
                     photoModeActions = emptyList()
                     photoSavePending = false
                     showEditor(currentNote ?: note)
-                    statusView.text = "照片已插入并保存"
+                    statusView?.text = "照片已插入并保存"
                 }
             } else {
                 repository.rollbackPhotoPair(attachments)
-                runOnUiThread { showPhotoSaveFailure("无法更新笔记，照片尚未插入；可重试或返回笔记") }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    showPhotoSaveFailure("无法更新笔记，照片尚未插入；可重试或返回笔记")
+                }
             }
         }.start()
     }
@@ -775,10 +828,13 @@ class MainActivity : Activity() {
     private inner class EditorBridge {
         @JavascriptInterface
         fun onChanged() {
-            if (screen != Screen.EDITOR) return
-            statusView.text = "未保存"
-            handler.removeCallbacksAndMessages(AUTOSAVE_TOKEN)
-            handler.postAtTime({ saveCurrentNote() }, AUTOSAVE_TOKEN, System.currentTimeMillis() + 600)
+            handler.post {
+                if (screen != Screen.EDITOR) return@post
+                documentDirty = true
+                statusView?.text = "未保存"
+                handler.removeCallbacks(autosave)
+                handler.postDelayed(autosave, AUTOSAVE_DELAY_MS)
+            }
         }
     }
 
@@ -942,7 +998,7 @@ class MainActivity : Activity() {
     }
 
     private fun notePreview(note: VaultDocument): String {
-        val value = repository.readText(note).orEmpty()
+        val value = repository.readPreview(note, NOTE_PREVIEW_BYTES).orEmpty()
             .lineSequence()
             .map { it.trim().removePrefix("#").trim() }
             .firstOrNull { it.isNotBlank() && !it.startsWith("![") }
@@ -1023,7 +1079,8 @@ class MainActivity : Activity() {
         private const val VAULT_REQUEST = 1002
         private const val CAMERA_REQUEST = 1003
         private const val FILE_PROVIDER_AUTHORITY = "com.markbook.android.fileprovider"
-        private const val MAX_PREVIEW_SIDE = 4096
-        private val AUTOSAVE_TOKEN = Any()
+        private const val MAX_PREVIEW_SIDE = 2560
+        private const val NOTE_PREVIEW_BYTES = 4096
+        private const val AUTOSAVE_DELAY_MS = 600L
     }
 }

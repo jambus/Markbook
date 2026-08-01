@@ -2,9 +2,10 @@
 
 ## Google Drive 配置
 
-1. 配置 Google OAuth 公共客户端和 Markbook 自定义回调。
-2. 只申请访问用户选择的文件范围所需的最小权限，不在应用中保存客户端密钥。
-3. 在“同步”中选择 Google Drive，完成授权并确认浏览器能返回 Markbook。
+1. 按 `android-google-oauth-setup.md` 配置 Google Drive API 和 Android OAuth
+   测试客户端；不要在仓库中保存客户端密钥。
+2. 在“同步”中选择 Google Drive，完成系统 Google 账号授权。
+3. 选择与电脑 Obsidian 对应的 Vault 根目录，确认首次同步范围后再上传。
 
 ## NAS 配置
 

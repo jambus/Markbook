@@ -7,7 +7,7 @@ Markbook 是一个面向 Mate 手机的本地优先 Markdown 笔记本。笔记�
 产品采用两套客户端：HarmonyOS 4 优先交付 Android APK，HarmonyOS 5/6 交付
 原生 Stage HAP。两端共享文件格式和验收样例，不共享平台 UI 代码。
 
-产品规格、技术计划和任务清单统一维护在 [`doc/`](doc/README.md)，按
+产品规格、技术计划和任务清单统一维护在 [`docs/`](docs/README.md)，按
 Spec Kit 的规格驱动流程推进。
 
 ## 当前工程状态
