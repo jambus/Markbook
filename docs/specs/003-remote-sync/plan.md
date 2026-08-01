@@ -28,7 +28,7 @@ Provider 共用文件内容流、基线、断点与错误契约及测试样例�
 ## Android Google Drive First Slice
 
 Android APK 先交付一个可在 Mate 60 使用的手动双向同步闭环：Google Play 服务账号授权、
-Drive Vault 文件夹选择、首次范围确认、递归比较、上传、下载、保留冲突副本和可见结果。
+Drive Vault 文件夹选择与新建、首次范围确认、递归比较、上传、下载、保留冲突副本和可见结果。
 实现直接使用 Drive REST API，不引入已废弃的 Drive Android API，也不把访问令牌写入
 SharedPreferences、Vault 或日志。
 

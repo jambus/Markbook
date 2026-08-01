@@ -395,9 +395,10 @@ class VaultRepository(private val context: Context) {
     private fun syncPathAllowed(path: String, directory: Boolean): Boolean {
         val parts = path.split('/')
         if (parts.firstOrNull() == ".obsidian") return false
+        if (parts.firstOrNull() == ".trash") return false
         if (parts.any { it.startsWith(".markbook-") || it.endsWith(".tmp") || it.endsWith(".bak") || it.endsWith(".txn") }) return false
-        // Only the user-visible trash is part of the sync scope; other .markbook data is local state.
-        if (parts.firstOrNull() == ".markbook" && parts.getOrNull(1) != "trash") return false
+        // All Markbook metadata is local state; the Vault-level .trash directory is excluded above.
+        if (parts.firstOrNull() == ".markbook") return false
         return directory || parts.lastOrNull()?.isNotBlank() == true
     }
 

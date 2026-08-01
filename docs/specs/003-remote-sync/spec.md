@@ -57,7 +57,10 @@ Mate 60 用户在 Android APK 中登录已有 Google 账号，选择一个已有
   REST API 访问；只保存远端文件夹标识、基线和非敏感显示信息，访问令牌由系统服务管理。
 - **FR-315** Android 首阶段必须让用户选择已有的 Drive 文件夹，并在首次实际
   写入前显示本地 Vault、Drive 文件夹和包含范围的确认页。
-- **FR-316** Android 手动同步必须比较整个 Vault 中的 Markdown、`assets/` 与
-  `.markbook/trash/`（若存在），排除 `.obsidian/`、临时文件和 Markbook 本机同步元数据。
+- **FR-316** Android 手动同步必须比较整个 Vault 中的 Markdown 与 `assets/`，排除
+  `.obsidian/`、`.trash/`、临时文件和 Markbook 本机同步元数据；`.trash/` 是仅在手机
+  本地保留的删除区。
+- **FR-318** Drive 文件夹选择器必须允许在当前目录创建远端文件夹；只有用户随后明确
+  选择“使用此目录”，新文件夹才成为同步 Vault。
 - **FR-317** 首阶段不传播删除、不承诺断点续传或 Drive 增量游标；界面和结果必须明确
   说明这一限制。后续阶段补齐 FR-311、FR-312 的删除、增量和大文件恢复能力。

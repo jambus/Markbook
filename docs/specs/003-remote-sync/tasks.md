@@ -16,7 +16,7 @@
 
 - [x] T307 调研并验证 Google Drive 官方账号授权与 Drive scope；已配置 Mate 60 测试用 Android OAuth 客户端。
 - [x] T308 Android：使用 Google Play 服务账号授权、短期令牌获取、重新认证和脱敏错误处理。
-- [x] T309 Android：实现 Drive 文件夹选择、递归目录映射和全量远端枚举。
+- [x] T309 Android：实现 Drive 文件夹选择、创建目录、递归目录映射和全量远端枚举。
 - [x] T310 Android：实现首次确认后的双向上传、下载、冲突保留和成功后完成记录。
 - [ ] T310a Android：补齐 Drive changes 游标、条件写入、删除回收站、可恢复上传与范围下载。
 

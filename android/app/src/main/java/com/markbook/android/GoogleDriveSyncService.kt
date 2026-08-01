@@ -180,7 +180,7 @@ class GoogleDriveSyncService(
         val parts = path.split('/')
         if (parts.any { it.isBlank() || it == "." || it == ".." || it.contains('\\') }) return false
         if (parts.firstOrNull() == ".obsidian") return false
-        if (parts.firstOrNull() == ".markbook" && parts.getOrNull(1) != "trash") return false
+        if (parts.firstOrNull() == ".trash" || parts.firstOrNull() == ".markbook") return false
         return parts.none { it.startsWith(".markbook-") || it.endsWith(".tmp") || it.endsWith(".bak") || it.endsWith(".txn") }
     }
 

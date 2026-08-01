@@ -2,6 +2,7 @@ package com.markbook.android
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -24,6 +25,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.EditText
 import com.google.android.gms.common.api.ApiException
 import java.io.File
 import java.io.FileInputStream
@@ -71,6 +73,7 @@ class MainActivity : Activity() {
     private val driveFolderHistory = mutableListOf<DriveVaultRoot>()
     private var drivePickerFolders: List<DriveItem>? = null
     private var drivePickerError: String? = null
+    private var drivePickerMessage: String? = null
     private var driveSyncCancelled: AtomicBoolean? = null
     private var driveProgressView: TextView? = null
 
@@ -368,7 +371,7 @@ class MainActivity : Activity() {
                 content.addView(action("选择 Drive Vault", true) { showDriveFolderPicker(true) }, matchWrap())
             } else {
                 content.addView(TextView(this).apply {
-                    text = "同步会比较 Markdown、assets 和 .markbook/trash（若有）；不会同步 .obsidian，也不会传播删除。"
+                    text = "同步会比较 Markdown 和 assets；不会同步 .obsidian、.trash，也不会传播删除。"
                     textSize = 13f
                     setTextColor(COLOR_MUTED_TEXT)
                     setPadding(dp(6), dp(2), dp(6), dp(14))
@@ -395,6 +398,7 @@ class MainActivity : Activity() {
         }
         drivePickerFolders = null
         drivePickerError = null
+        drivePickerMessage = "正在读取 Drive 文件夹…"
         screen = Screen.DRIVE_FOLDER_PICKER
         renderDriveFolderPicker()
         loadDriveFolders()
@@ -435,13 +439,17 @@ class MainActivity : Activity() {
                 driveFolderDirectory = driveFolderHistory.removeAt(driveFolderHistory.lastIndex)
                 drivePickerFolders = null
                 drivePickerError = null
+                drivePickerMessage = "正在读取 Drive 文件夹…"
                 renderDriveFolderPicker()
                 loadDriveFolders()
             }, wrapWrap().apply { bottomMargin = dp(8) })
         }
+        content.addView(action("新建文件夹", false) { promptCreateDriveFolder() }, matchWrap().apply {
+            bottomMargin = dp(12)
+        })
         when {
             drivePickerError != null -> content.addView(infoBanner(drivePickerError!!), matchWrap())
-            drivePickerFolders == null -> content.addView(emptyState("正在读取 Drive 文件夹…"), matchWrap())
+            drivePickerFolders == null -> content.addView(emptyState(drivePickerMessage ?: "正在读取 Drive 文件夹…"), matchWrap())
             drivePickerFolders!!.isEmpty() -> content.addView(emptyState("此目录没有子文件夹，仍可选择它作为 Vault。"), matchWrap())
             else -> {
                 sectionLabel(content, "文件夹", drivePickerFolders!!.size)
@@ -451,6 +459,7 @@ class MainActivity : Activity() {
                         driveFolderDirectory = DriveVaultRoot(folder.id, folder.name)
                         drivePickerFolders = null
                         drivePickerError = null
+                        drivePickerMessage = "正在读取 Drive 文件夹…"
                         renderDriveFolderPicker()
                         loadDriveFolders()
                     }, matchWrap().apply { bottomMargin = dp(8) })
@@ -473,6 +482,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (screen == Screen.DRIVE_FOLDER_PICKER && driveFolderDirectory.id == location.id) {
                         drivePickerFolders = folders
+                        drivePickerMessage = null
                         renderDriveFolderPicker()
                     }
                 }
@@ -480,6 +490,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (screen == Screen.DRIVE_FOLDER_PICKER && driveFolderDirectory.id == location.id) {
                         drivePickerError = "无法读取 Google Drive，请检查网络或重新登录后重试"
+                        drivePickerMessage = null
                         renderDriveFolderPicker()
                     }
                 }
@@ -491,6 +502,74 @@ class MainActivity : Activity() {
         drivePreferences.setRoot(driveFolderDirectory)
         showDriveSetup("已选择 ${driveFolderDirectory.name}。同步前仍会再次确认范围。")
     }
+
+    private fun promptCreateDriveFolder() {
+        val input = EditText(this).apply {
+            hint = "文件夹名称"
+            setSingleLine(true)
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("新建 Drive 文件夹")
+            .setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("创建", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = input.text.toString().trim()
+                if (!validDriveFolderName(name)) {
+                    input.error = "请输入不含 / 的文件夹名称"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                createDriveFolder(name)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun createDriveFolder(name: String) {
+        val location = driveFolderDirectory
+        val account = driveAuth.currentAccount() ?: run {
+            showDriveSetup("Google 账号需要重新登录")
+            return
+        }
+        drivePickerFolders = null
+        drivePickerError = null
+        drivePickerMessage = "正在创建 $name…"
+        renderDriveFolderPicker()
+        driveExecutor.execute {
+            try {
+                val api = GoogleDriveApi(driveAuth.accessToken(account))
+                val folder = api.listChildren(location.id).firstOrNull {
+                    it.name == name && it.mimeType == GoogleDriveApi.FOLDER_MIME_TYPE
+                } ?: api.createFolder(location.id, name)
+                runOnUiThread {
+                    if (screen == Screen.DRIVE_FOLDER_PICKER && driveFolderDirectory.id == location.id) {
+                        driveFolderHistory += location
+                        driveFolderDirectory = DriveVaultRoot(folder.id, folder.name)
+                        drivePickerFolders = null
+                        drivePickerError = null
+                        drivePickerMessage = "正在读取 Drive 文件夹…"
+                        renderDriveFolderPicker()
+                        loadDriveFolders()
+                    }
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (screen == Screen.DRIVE_FOLDER_PICKER && driveFolderDirectory.id == location.id) {
+                        drivePickerError = "无法创建文件夹，请检查网络或重新登录后重试"
+                        drivePickerMessage = null
+                        renderDriveFolderPicker()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun validDriveFolderName(name: String): Boolean =
+        name.isNotBlank() && name != "." && name != ".." && !name.contains('/') && !name.contains('\\')
 
     private fun showDriveSyncConfirmation(rootSelection: DriveVaultRoot) {
         screen = Screen.DRIVE_CONFIRM
@@ -507,7 +586,7 @@ class MainActivity : Activity() {
             setTextColor(COLOR_PRIMARY_TEXT)
         }, matchWrap())
         content.addView(TextView(this).apply {
-            text = "本地 Vault：${repository.vaultRoot()?.name ?: "当前 Vault"}\nGoogle Drive：${rootSelection.name}\n\n将比较 Markdown、assets 与 .markbook/trash（若有）。.obsidian、临时文件和本机同步信息不会上传。\n\n同名但内容不同的文件会各保留一份冲突副本；本阶段不会删除任何一端的文件。"
+            text = "本地 Vault：${repository.vaultRoot()?.name ?: "当前 Vault"}\nGoogle Drive：${rootSelection.name}\n\n将比较 Markdown 与 assets。.obsidian、.trash、临时文件和本机同步信息不会上传。\n\n同名但内容不同的文件会各保留一份冲突副本；本阶段不会删除任何一端的文件。"
             textSize = 15f
             setTextColor(COLOR_SECONDARY_TEXT)
             setPadding(0, dp(12), 0, dp(22))
