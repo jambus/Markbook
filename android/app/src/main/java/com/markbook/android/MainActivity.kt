@@ -298,24 +298,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(4), dp(16), dp(24))
         }
-        sectionLabel(content, "显示", 0)
-        val appearance = repository.appearanceMode()
-        content.addView(settingsRow("日间模式", "浅色背景与深色文字", appearance == VaultRepository.APPEARANCE_DAY) {
-            setAppearance(VaultRepository.APPEARANCE_DAY)
-        }, matchWrap().apply { bottomMargin = dp(8) })
-        content.addView(settingsRow("夜间模式", "深色工作区与深色编辑纸面", appearance == VaultRepository.APPEARANCE_NIGHT) {
-            setAppearance(VaultRepository.APPEARANCE_NIGHT)
-        }, matchWrap())
-        sectionLabel(content, "每日笔记", 0)
-        val path = repository.dailyNoteDirectoryPath().ifBlank { "Vault 根目录" }
-        content.addView(settingsRow("今日笔记目录", path, false) { showDailyFolderPicker(true) }, matchWrap())
-        content.addView(TextView(this).apply {
-            text = "设置不会移动已有笔记或附件。新建的每日笔记会按 yyyy-MM-dd.md 写入所选目录。"
-            textSize = 13f
-            setTextColor(COLOR_MUTED_TEXT)
-            setPadding(dp(6), dp(12), dp(6), 0)
-        }, matchWrap())
-        sectionLabel(content, "同步", 0)
+        sectionLabel(content, "同步")
         val driveRoot = drivePreferences.root()
         val driveStatus = when {
             driveRoot == null -> "未连接"
@@ -324,6 +307,38 @@ class MainActivity : Activity() {
             else -> "已选择 ${driveRoot.name}"
         }
         content.addView(settingsRow("Google Drive", driveStatus, false) { showDriveSetup() }, matchWrap())
+        sectionLabel(content, "每日笔记")
+        val path = repository.dailyNoteDirectoryPath().ifBlank { "Vault 根目录" }
+        content.addView(settingsRow("今日笔记目录", path, false) { showDailyFolderPicker(true) }, matchWrap())
+        content.addView(TextView(this).apply {
+            text = "设置不会移动已有笔记或附件。新建的每日笔记会按 yyyy-MM-dd.md 写入所选目录。"
+            textSize = 13f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(dp(6), dp(12), dp(6), 0)
+        }, matchWrap())
+        sectionLabel(content, "显示")
+        val appearance = repository.appearanceMode()
+        content.addView(settingsRow("日间模式", "浅色背景与深色文字", appearance == VaultRepository.APPEARANCE_DAY) {
+            setAppearance(VaultRepository.APPEARANCE_DAY)
+        }, matchWrap().apply { bottomMargin = dp(8) })
+        content.addView(settingsRow("夜间模式", "深色工作区与深色编辑纸面", appearance == VaultRepository.APPEARANCE_NIGHT) {
+            setAppearance(VaultRepository.APPEARANCE_NIGHT)
+        }, matchWrap())
+        sectionLabel(content, "语言")
+        content.addView(settingsStatusRow("中文", "当前应用语言", "已启用  ✓", true), matchWrap().apply {
+            bottomMargin = dp(8)
+        })
+        content.addView(settingsStatusRow("English", "完整英文翻译即将支持", "即将支持", false), matchWrap())
+        sectionLabel(content, "关于")
+        content.addView(
+            settingsStatusRow(
+                "版本",
+                "v${BuildConfig.VERSION_NAME} · 构建 ${BuildConfig.VERSION_CODE}",
+                "Markbook",
+                false
+            ),
+            matchWrap()
+        )
         scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
@@ -1263,9 +1278,9 @@ class MainActivity : Activity() {
         startActivityForResult(intent, VAULT_REQUEST)
     }
 
-    private fun sectionLabel(container: LinearLayout, label: String, count: Int) {
+    private fun sectionLabel(container: LinearLayout, label: String, count: Int? = null) {
         container.addView(TextView(this).apply {
-            text = "$label  $count"
+            text = count?.let { "$label  $it" } ?: label
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(COLOR_MUTED_TEXT)
@@ -1374,6 +1389,36 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setTextColor(if (selected) COLOR_ACCENT else COLOR_MUTED_TEXT)
         }, LinearLayout.LayoutParams(dp(72), dp(44)))
+    }
+
+    private fun settingsStatusRow(title: String, subtitle: String, status: String, active: Boolean): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(68)
+        setPadding(dp(16), dp(10), dp(12), dp(10))
+        background = rounded(COLOR_ROW, dp(14))
+        contentDescription = "$title，$subtitle，$status"
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 16f
+                setTextColor(COLOR_PRIMARY_TEXT)
+            }, matchWrap())
+            addView(TextView(this@MainActivity).apply {
+                text = subtitle
+                textSize = 13f
+                maxLines = 1
+                setTextColor(COLOR_MUTED_TEXT)
+                setPadding(0, dp(3), 0, 0)
+            }, matchWrap())
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(TextView(this@MainActivity).apply {
+            text = status
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(if (active) COLOR_ACCENT else COLOR_MUTED_TEXT)
+        }, LinearLayout.LayoutParams(dp(92), dp(44)))
     }
 
     private fun emptyState(message: String): View = TextView(this).apply {
