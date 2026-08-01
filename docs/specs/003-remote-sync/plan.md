@@ -24,3 +24,13 @@ Provider 共用文件内容流、基线、断点与错误契约及测试样例�
    与外网访问、证书和权限行为。
 5. 增加配置、进度、取消、错误摘要和手动同步 UI。
 6. 完成多设备、弱网、令牌失效和 NAS 兼容性验证。
+
+## Android Google Drive First Slice
+
+Android APK 先交付一个可在 Mate 60 使用的手动双向同步闭环：Google Play 服务账号授权、
+Drive Vault 文件夹选择、首次范围确认、递归比较、上传、下载、保留冲突副本和可见结果。
+实现直接使用 Drive REST API，不引入已废弃的 Drive Android API，也不把访问令牌写入
+SharedPreferences、Vault 或日志。
+
+首阶段每轮重新列出远端，且不传播删除；它是安全可用的电脑 Obsidian 互通基础，而非
+完整的增量同步实现。完成后再接入 Drive changes 游标、条件写入、可恢复上传和删除回收站。

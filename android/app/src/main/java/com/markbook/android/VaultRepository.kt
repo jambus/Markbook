@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import java.io.InputStream
+import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -24,6 +25,11 @@ data class PhotoAttachments(
     val corrected: String,
     val relativeDirectory: String,
     val transactionUri: Uri
+)
+
+data class VaultSyncFile(
+    val relativePath: String,
+    val document: VaultDocument
 )
 
 class VaultRepository(private val context: Context) {
@@ -300,6 +306,63 @@ class VaultRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Returns the user-owned files that may be synchronized. App configuration and interrupted
+     * write artifacts never leave the device; the optional Vault trash remains user content.
+     */
+    fun syncFiles(): List<VaultSyncFile> {
+        val tree = savedVaultUri() ?: return emptyList()
+        return try {
+            scanSyncDirectory(tree, rootDocument(tree))
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun openSyncInput(file: VaultSyncFile): InputStream? = try {
+        resolver.openInputStream(file.document.uri)
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Writes a downloaded file with the same recoverable replace protocol as note saving. */
+    fun writeSyncFile(relativePath: String, mimeType: String?, input: InputStream): Boolean {
+        val cleanPath = safeSyncPath(relativePath) ?: return false
+        val tree = savedVaultUri() ?: return false
+        val parts = cleanPath.split('/')
+        val name = parts.last()
+        val parent = findOrCreateDirectory(tree, parts.dropLast(1)) ?: return false
+        val temp = DocumentsContract.createDocument(
+            resolver,
+            parent,
+            mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream",
+            ".markbook-${UUID.randomUUID()}.tmp"
+        ) ?: return false
+        var backup: Uri? = null
+        return try {
+            resolver.openOutputStream(temp, "wt")?.use { output -> copyStream(input, output) }
+                ?: throw IllegalStateException("Unable to write downloaded file")
+            val existing = findChild(tree, parent, name)
+            if (existing != null) {
+                backup = DocumentsContract.renameDocument(
+                    resolver,
+                    existing.uri,
+                    ".markbook-${UUID.randomUUID()}.bak"
+                )
+                if (backup == null) throw IllegalStateException("Unable to protect existing file")
+            }
+            if (DocumentsContract.renameDocument(resolver, temp, name) == null) {
+                throw IllegalStateException("Unable to commit downloaded file")
+            }
+            backup?.let { uri -> try { DocumentsContract.deleteDocument(resolver, uri) } catch (_: Exception) { } }
+            true
+        } catch (_: Exception) {
+            try { backup?.let { DocumentsContract.renameDocument(resolver, it, name) } } catch (_: Exception) { }
+            try { DocumentsContract.deleteDocument(resolver, temp) } catch (_: Exception) { }
+            false
+        }
+    }
+
     fun htmlAttachmentUrl(relativePath: String): String =
         "markbook://attachment/" + Uri.encode(relativePath, "/")
 
@@ -313,6 +376,45 @@ class VaultRepository(private val context: Context) {
             parent = current.uri
         }
         return current
+    }
+
+    private fun scanSyncDirectory(tree: Uri, directory: Uri, prefix: String = ""): List<VaultSyncFile> {
+        return buildList {
+            listChildren(tree, directory).forEach { child ->
+                val path = listOf(prefix, child.name).filter { it.isNotEmpty() }.joinToString("/")
+                if (!syncPathAllowed(path, child.mimeType == DocumentsContract.Document.MIME_TYPE_DIR)) return@forEach
+                if (child.mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    addAll(scanSyncDirectory(tree, child.uri, path))
+                } else {
+                    add(VaultSyncFile(path, child))
+                }
+            }
+        }
+    }
+
+    private fun syncPathAllowed(path: String, directory: Boolean): Boolean {
+        val parts = path.split('/')
+        if (parts.firstOrNull() == ".obsidian") return false
+        if (parts.any { it.startsWith(".markbook-") || it.endsWith(".tmp") || it.endsWith(".bak") || it.endsWith(".txn") }) return false
+        // Only the user-visible trash is part of the sync scope; other .markbook data is local state.
+        if (parts.firstOrNull() == ".markbook" && parts.getOrNull(1) != "trash") return false
+        return directory || parts.lastOrNull()?.isNotBlank() == true
+    }
+
+    private fun safeSyncPath(relativePath: String): String? {
+        val parts = relativePath.split('/')
+        if (parts.isEmpty() || parts.any { it.isBlank() || it == "." || it == ".." || it.contains('\\') }) return null
+        val clean = parts.joinToString("/")
+        return clean.takeIf { syncPathAllowed(it, false) }
+    }
+
+    private fun copyStream(input: InputStream, output: OutputStream) {
+        val buffer = ByteArray(DEFAULT_SYNC_BUFFER_BYTES)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) return
+            output.write(buffer, 0, read)
+        }
     }
 
     private fun normalizeRelativePath(relativePath: String): String {
@@ -486,6 +588,7 @@ class VaultRepository(private val context: Context) {
         private const val MAX_PHOTO_NAME_ATTEMPTS = 32
         private const val PHOTO_RANDOM_LENGTH = 4
         private const val PHOTO_RANDOM_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+        private const val DEFAULT_SYNC_BUFFER_BYTES = 32 * 1024
         private val photoRandom = SecureRandom()
     }
 }

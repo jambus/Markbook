@@ -24,12 +24,21 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.google.android.gms.common.api.ApiException
 import java.io.File
 import java.io.FileInputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : Activity() {
     private lateinit var repository: VaultRepository
+    private lateinit var drivePreferences: DriveSyncPreferences
+    private lateinit var driveAuth: GoogleDriveAuth
+    private val driveExecutor = Executors.newSingleThreadExecutor()
     private var webView: WebView? = null
     private var statusView: TextView? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -58,10 +67,18 @@ class MainActivity : Activity() {
     private var queuedExtra: String? = null
     private val queuedCompletions = mutableListOf<(Boolean) -> Unit>()
     private var screen = Screen.WELCOME
+    private var driveFolderDirectory = DriveVaultRoot("root", "我的云端硬盘")
+    private val driveFolderHistory = mutableListOf<DriveVaultRoot>()
+    private var drivePickerFolders: List<DriveItem>? = null
+    private var drivePickerError: String? = null
+    private var driveSyncCancelled: AtomicBoolean? = null
+    private var driveProgressView: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = VaultRepository(this)
+        drivePreferences = DriveSyncPreferences(this)
+        driveAuth = GoogleDriveAuth(this)
         applyWindowColors()
         if (repository.savedVaultUri() == null) showWelcome() else showVaultBrowser()
     }
@@ -73,6 +90,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(autosave)
+        driveSyncCancelled?.set(true)
+        driveExecutor.shutdownNow()
         releaseEditor()
         super.onDestroy()
     }
@@ -102,6 +121,9 @@ class MainActivity : Activity() {
             Screen.PHOTO -> restoreEditorScreen()
             Screen.SETTINGS -> showVaultBrowser()
             Screen.DAILY_FOLDER_PICKER -> showSettings()
+            Screen.DRIVE_SETUP, Screen.DRIVE_RESULT -> showSettings()
+            Screen.DRIVE_FOLDER_PICKER, Screen.DRIVE_CONFIRM -> showDriveSetup()
+            Screen.DRIVE_PROGRESS -> showSettings()
             Screen.WELCOME -> super.onBackPressed()
         }
     }
@@ -290,6 +312,15 @@ class MainActivity : Activity() {
             setTextColor(COLOR_MUTED_TEXT)
             setPadding(dp(6), dp(12), dp(6), 0)
         }, matchWrap())
+        sectionLabel(content, "同步", 0)
+        val driveRoot = drivePreferences.root()
+        val driveStatus = when {
+            driveRoot == null -> "未连接"
+            !driveAuth.isAuthorized(driveAuth.currentAccount()) -> "需要重新登录 · ${driveRoot.name}"
+            drivePreferences.lastSuccessAt() > 0L -> "${driveRoot.name} · 上次同步 ${formatSyncTime(drivePreferences.lastSuccessAt())}"
+            else -> "已选择 ${driveRoot.name}"
+        }
+        content.addView(settingsRow("Google Drive", driveStatus, false) { showDriveSetup() }, matchWrap())
         scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
@@ -299,6 +330,299 @@ class MainActivity : Activity() {
         repository.setAppearanceMode(mode)
         applyWindowColors()
         showSettings()
+    }
+
+    private fun showDriveSetup(message: String? = null) {
+        releaseEditor()
+        screen = Screen.DRIVE_SETUP
+        val root = pageRoot(COLOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  设置", "Google Drive") { showSettings() }, matchWrap())
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(24))
+        }
+        message?.let { content.addView(infoBanner(it), matchWrap().apply { bottomMargin = dp(12) }) }
+        val account = driveAuth.currentAccount()
+        if (!driveAuth.isAuthorized(account)) {
+            content.addView(emptyState("连接 Google 账号后，才能选择用于电脑 Obsidian 的 Drive Vault。"), matchWrap().apply {
+                bottomMargin = dp(14)
+            })
+            content.addView(action("连接 Google Drive", true) {
+                startActivityForResult(driveAuth.signInIntent(), DRIVE_SIGN_IN_REQUEST)
+            }, matchWrap())
+        } else {
+            content.addView(TextView(this).apply {
+                text = "已连接 ${account?.email ?: "Google 账号"}"
+                textSize = 14f
+                setTextColor(COLOR_SECONDARY_TEXT)
+                setPadding(dp(6), dp(2), dp(6), dp(14))
+            }, matchWrap())
+            val selectedRoot = drivePreferences.root()
+            content.addView(settingsRow(
+                "Drive Vault",
+                selectedRoot?.name ?: "尚未选择远端文件夹",
+                selectedRoot != null
+            ) { showDriveFolderPicker(true) }, matchWrap().apply { bottomMargin = dp(12) })
+            if (selectedRoot == null) {
+                content.addView(action("选择 Drive Vault", true) { showDriveFolderPicker(true) }, matchWrap())
+            } else {
+                content.addView(TextView(this).apply {
+                    text = "同步会比较 Markdown、assets 和 .markbook/trash（若有）；不会同步 .obsidian，也不会传播删除。"
+                    textSize = 13f
+                    setTextColor(COLOR_MUTED_TEXT)
+                    setPadding(dp(6), dp(2), dp(6), dp(14))
+                }, matchWrap())
+                content.addView(action("比较并同步", true) { showDriveSyncConfirmation(selectedRoot) }, matchWrap())
+                content.addView(action("更换 Drive Vault", false) { showDriveFolderPicker(true) }, matchWrap().apply {
+                    topMargin = dp(8)
+                })
+            }
+        }
+        scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private fun showDriveFolderPicker(reset: Boolean = false) {
+        if (!driveAuth.isAuthorized(driveAuth.currentAccount())) {
+            showDriveSetup("Google 账号需要重新登录")
+            return
+        }
+        if (reset) {
+            driveFolderDirectory = DriveVaultRoot("root", "我的云端硬盘")
+            driveFolderHistory.clear()
+        }
+        drivePickerFolders = null
+        drivePickerError = null
+        screen = Screen.DRIVE_FOLDER_PICKER
+        renderDriveFolderPicker()
+        loadDriveFolders()
+    }
+
+    private fun renderDriveFolderPicker() {
+        val root = pageRoot(COLOR_BACKGROUND)
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(8))
+            background = colorBlock(COLOR_SURFACE)
+            addView(action("‹  Google Drive", false) { showDriveSetup() })
+            addView(TextView(this@MainActivity).apply {
+                text = "选择 Drive Vault"
+                textSize = 17f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_PRIMARY_TEXT)
+                maxLines = 1
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            addView(action("使用此目录", true) { confirmDriveFolder() })
+        }
+        root.addView(toolbar, matchWrap())
+        root.addView(TextView(this).apply {
+            text = driveFolderDirectory.name
+            textSize = 13f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }, matchWrap())
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), dp(24))
+        }
+        if (driveFolderHistory.isNotEmpty()) {
+            content.addView(action("‹  上一级", false) {
+                driveFolderDirectory = driveFolderHistory.removeAt(driveFolderHistory.lastIndex)
+                drivePickerFolders = null
+                drivePickerError = null
+                renderDriveFolderPicker()
+                loadDriveFolders()
+            }, wrapWrap().apply { bottomMargin = dp(8) })
+        }
+        when {
+            drivePickerError != null -> content.addView(infoBanner(drivePickerError!!), matchWrap())
+            drivePickerFolders == null -> content.addView(emptyState("正在读取 Drive 文件夹…"), matchWrap())
+            drivePickerFolders!!.isEmpty() -> content.addView(emptyState("此目录没有子文件夹，仍可选择它作为 Vault。"), matchWrap())
+            else -> {
+                sectionLabel(content, "文件夹", drivePickerFolders!!.size)
+                drivePickerFolders!!.forEach { folder ->
+                    content.addView(vaultRow("▸", folder.name, "Google Drive 文件夹") {
+                        driveFolderHistory += driveFolderDirectory
+                        driveFolderDirectory = DriveVaultRoot(folder.id, folder.name)
+                        drivePickerFolders = null
+                        drivePickerError = null
+                        renderDriveFolderPicker()
+                        loadDriveFolders()
+                    }, matchWrap().apply { bottomMargin = dp(8) })
+                }
+            }
+        }
+        scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private fun loadDriveFolders() {
+        val location = driveFolderDirectory
+        val account = driveAuth.currentAccount() ?: return
+        driveExecutor.execute {
+            try {
+                val folders = GoogleDriveApi(driveAuth.accessToken(account)).listChildren(location.id)
+                    .filter { it.mimeType == GoogleDriveApi.FOLDER_MIME_TYPE }
+                    .sortedBy { it.name.lowercase() }
+                runOnUiThread {
+                    if (screen == Screen.DRIVE_FOLDER_PICKER && driveFolderDirectory.id == location.id) {
+                        drivePickerFolders = folders
+                        renderDriveFolderPicker()
+                    }
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (screen == Screen.DRIVE_FOLDER_PICKER && driveFolderDirectory.id == location.id) {
+                        drivePickerError = "无法读取 Google Drive，请检查网络或重新登录后重试"
+                        renderDriveFolderPicker()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun confirmDriveFolder() {
+        drivePreferences.setRoot(driveFolderDirectory)
+        showDriveSetup("已选择 ${driveFolderDirectory.name}。同步前仍会再次确认范围。")
+    }
+
+    private fun showDriveSyncConfirmation(rootSelection: DriveVaultRoot) {
+        screen = Screen.DRIVE_CONFIRM
+        val root = pageRoot(COLOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  Google Drive", "确认同步") { showDriveSetup() }, matchWrap())
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(24))
+        }
+        content.addView(TextView(this).apply {
+            text = "比较并同步"
+            textSize = 22f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(COLOR_PRIMARY_TEXT)
+        }, matchWrap())
+        content.addView(TextView(this).apply {
+            text = "本地 Vault：${repository.vaultRoot()?.name ?: "当前 Vault"}\nGoogle Drive：${rootSelection.name}\n\n将比较 Markdown、assets 与 .markbook/trash（若有）。.obsidian、临时文件和本机同步信息不会上传。\n\n同名但内容不同的文件会各保留一份冲突副本；本阶段不会删除任何一端的文件。"
+            textSize = 15f
+            setTextColor(COLOR_SECONDARY_TEXT)
+            setPadding(0, dp(12), 0, dp(22))
+        }, matchWrap())
+        content.addView(action("开始同步", true) { startDriveSync(rootSelection) }, matchWrap())
+        content.addView(action("取消", false) { showDriveSetup() }, matchWrap().apply { topMargin = dp(8) })
+        root.addView(content, matchWrap())
+        setContentView(root)
+    }
+
+    private fun startDriveSync(rootSelection: DriveVaultRoot) {
+        val account = driveAuth.currentAccount()
+        if (!driveAuth.isAuthorized(account) || account == null) {
+            showDriveSetup("Google 账号需要重新登录")
+            return
+        }
+        val cancellation = AtomicBoolean(false)
+        driveSyncCancelled = cancellation
+        showDriveSyncProgress("正在连接 Google Drive…", cancellation)
+        driveExecutor.execute {
+            val result = try {
+                val token = driveAuth.accessToken(account)
+                GoogleDriveSyncService(repository, GoogleDriveApi(token), cancellation) { progress ->
+                    runOnUiThread {
+                        if (screen == Screen.DRIVE_PROGRESS && driveSyncCancelled === cancellation) {
+                            updateDriveProgress(progress)
+                        }
+                    }
+                }.sync(rootSelection)
+            } catch (_: Exception) {
+                DriveSyncResult(0, 0, 0, 0, listOf("无法连接 Google Drive，请检查网络或重新登录"), false)
+            }
+            if (result.isSuccessful) drivePreferences.markSuccessful()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (screen == Screen.DRIVE_PROGRESS && driveSyncCancelled === cancellation) showDriveSyncResult(result)
+            }
+        }
+    }
+
+    private fun showDriveSyncProgress(message: String, cancellation: AtomicBoolean) {
+        screen = Screen.DRIVE_PROGRESS
+        val root = pageRoot(COLOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  设置", "正在同步") { showSettings() }, matchWrap())
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20), dp(34), dp(20), dp(24))
+        }
+        content.addView(TextView(this).apply {
+            text = "Google Drive 同步"
+            textSize = 22f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(COLOR_PRIMARY_TEXT)
+            gravity = Gravity.CENTER
+        }, matchWrap())
+        driveProgressView = TextView(this).apply {
+            text = message
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setTextColor(COLOR_SECONDARY_TEXT)
+            setPadding(dp(8), dp(16), dp(8), dp(22))
+        }
+        content.addView(driveProgressView, matchWrap())
+        content.addView(action("取消同步", false) {
+            cancellation.set(true)
+            driveProgressView?.text = "将在当前文件完成后取消…"
+        }, wrapWrap())
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private fun updateDriveProgress(progress: DriveSyncProgress) {
+        driveProgressView?.text = if (progress.total == 0) progress.message else {
+            "${progress.message}\n${progress.completed} / ${progress.total}"
+        }
+    }
+
+    private fun showDriveSyncResult(result: DriveSyncResult) {
+        driveProgressView = null
+        screen = Screen.DRIVE_RESULT
+        val root = pageRoot(COLOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  设置", "同步结果") { showSettings() }, matchWrap())
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(24))
+        }
+        val heading = when {
+            result.cancelled -> "同步已取消"
+            result.errors.isNotEmpty() -> "同步未完全完成"
+            result.conflicts > 0 -> "同步完成，保留了冲突副本"
+            else -> "同步完成"
+        }
+        content.addView(TextView(this).apply {
+            text = heading
+            textSize = 22f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(COLOR_PRIMARY_TEXT)
+        }, matchWrap())
+        content.addView(TextView(this).apply {
+            text = "上传 ${result.uploaded} 个，下载 ${result.downloaded} 个，未变更 ${result.unchanged} 个，冲突 ${result.conflicts} 个。\n\n本阶段不会同步删除；同名冲突已分别保存为包含 Markbook 或 Google Drive 的副本。"
+            textSize = 15f
+            setTextColor(COLOR_SECONDARY_TEXT)
+            setPadding(0, dp(12), 0, dp(12))
+        }, matchWrap())
+        if (result.errors.isNotEmpty()) {
+            content.addView(infoBanner("以下文件未完成：\n${result.errors.take(5).joinToString("\n")}"), matchWrap().apply {
+                bottomMargin = dp(12)
+            })
+        }
+        content.addView(action("返回设置", true) { showSettings() }, matchWrap())
+        scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
     }
 
     private fun showDailyFolderPicker(reset: Boolean = false) {
@@ -599,6 +923,19 @@ class MainActivity : Activity() {
                 browserDirectory = null
                 browserPath.clear()
                 showVaultBrowser(true)
+            }
+            return
+        }
+        if (requestCode == DRIVE_SIGN_IN_REQUEST) {
+            try {
+                val account = driveAuth.accountFromResult(data)
+                if (driveAuth.isAuthorized(account)) {
+                    showDriveSetup("Google Drive 已连接，请选择远端 Vault。")
+                } else {
+                    showDriveSetup("Google 账号尚未授予 Drive 访问权限")
+                }
+            } catch (_: ApiException) {
+                showDriveSetup("无法连接 Google Drive，请重试或确认该账号是测试用户")
             }
             return
         }
@@ -1025,6 +1362,23 @@ class MainActivity : Activity() {
         setBackgroundColor(color)
     }
 
+    private fun simpleToolbar(backLabel: String, title: String, back: () -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), dp(10), dp(12), dp(8))
+        background = colorBlock(COLOR_SURFACE)
+        addView(action(backLabel, false, back))
+        addView(TextView(this@MainActivity).apply {
+            text = title
+            textSize = 19f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(COLOR_PRIMARY_TEXT)
+            maxLines = 1
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        addView(TextView(this@MainActivity), LinearLayout.LayoutParams(dp(96), dp(44)))
+    }
+
     private fun rounded(color: Int, radius: Int): GradientDrawable = GradientDrawable().apply {
         setColor(color)
         cornerRadius = radius.toFloat()
@@ -1037,6 +1391,9 @@ class MainActivity : Activity() {
     private fun wrapWrap(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(-2, -2)
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun formatSyncTime(time: Long): String =
+        SimpleDateFormat("MM-dd HH:mm", Locale.US).format(Date(time))
 
     private fun isNightTheme(): Boolean = repository.appearanceMode() == VaultRepository.APPEARANCE_NIGHT
 
@@ -1072,12 +1429,16 @@ class MainActivity : Activity() {
     private val COLOR_ON_ACCENT: Int
         get() = Color.WHITE
 
-    private enum class Screen { WELCOME, BROWSER, EDITOR, PHOTO, SETTINGS, DAILY_FOLDER_PICKER }
+    private enum class Screen {
+        WELCOME, BROWSER, EDITOR, PHOTO, SETTINGS, DAILY_FOLDER_PICKER,
+        DRIVE_SETUP, DRIVE_FOLDER_PICKER, DRIVE_CONFIRM, DRIVE_PROGRESS, DRIVE_RESULT
+    }
 
     companion object {
         private const val CAMERA_PERMISSION_REQUEST = 1001
         private const val VAULT_REQUEST = 1002
         private const val CAMERA_REQUEST = 1003
+        private const val DRIVE_SIGN_IN_REQUEST = 1004
         private const val FILE_PROVIDER_AUTHORITY = "com.markbook.android.fileprovider"
         private const val MAX_PREVIEW_SIDE = 2560
         private const val NOTE_PREVIEW_BYTES = 4096

@@ -20,9 +20,17 @@ Android OAuth flow and does not use a client secret.
    Debug SHA-1:  6E:32:05:4F:82:2D:2F:59:84:23:C7:DF:26:18:ED:32:CC:43:D8:E6
    ```
 
-5. Provide only the generated client ID to the local Android build
-   configuration. Do not add a client secret, Google password, refresh token,
-   or credential JSON file to this repository.
+5. The Android OAuth client is matched by package name and signing SHA-1; the
+   APK does not embed a client secret. Keep the generated client ID in the Cloud
+   Console record for support, but do not add a client secret, Google password,
+   refresh token, or credential JSON file to this repository.
+
+## Current Local Configuration
+
+The supplied Android client is registered for `com.markbook.android`. The app
+uses the account selected through Google Play services and requests the Drive
+scope only when the user connects Google Drive. No client ID, token, or account
+email is written into the selected Vault.
 
 ## Release Note
 
