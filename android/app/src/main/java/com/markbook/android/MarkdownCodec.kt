@@ -18,6 +18,7 @@ object MarkdownCodec {
     private val IMAGE_PATTERN: Pattern = Pattern.compile("!\\[([^]]*)]\\(([^)]+)\\)")
     private val BOLD_PATTERN = Regex("\\*\\*([^*]+)\\*\\*")
     private val ITALIC_PATTERN = Regex("\\*([^*]+)\\*")
+    private val LINK_PATTERN = Regex("\\[([^]]+)]\\(([^\\s)]+)\\)")
     private val ORDERED_ITEM = Regex("^\\d+[.)]\\s")
     private val TASK_ITEM = Regex("^[-*+]\\s+\\[[ xX]]")
     private val THEMATIC_BREAK = Regex("^(-{3,}|\\*{3,}|_{3,}|={3,})$")
@@ -97,6 +98,10 @@ object MarkdownCodec {
 
             when {
                 line.isEmpty() -> body.append("<p><br></p>")
+                line.startsWith("##### ") -> body.append("<h5>")
+                    .append(inline(line.substring(6), attachmentUrl)).append("</h5>")
+                line.startsWith("#### ") -> body.append("<h4>")
+                    .append(inline(line.substring(5), attachmentUrl)).append("</h4>")
                 line.startsWith("### ") -> body.append("<h3>")
                     .append(inline(line.substring(4), attachmentUrl)).append("</h3>")
                 line.startsWith("## ") -> body.append("<h2>")
@@ -173,7 +178,7 @@ object MarkdownCodec {
             <!doctype html>
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
             <style>body{margin:0;background:$background} #editor{box-sizing:border-box;max-width:760px;min-height:100vh;margin:0 auto;padding:18px 20px 56px;font-family:sans-serif;font-size:1.125rem;line-height:1.62;color:$text;caret-color:$caret;outline:none}
-            img{max-width:100%;height:auto;border-radius:8px} h1,h2,h3{line-height:1.25;color:$heading} h1{font-size:1.7em;margin-top:.35em} h2{font-size:1.3em;margin-top:1.45em} p{margin:.6em 0} ul{padding-left:1.35em}
+            img{max-width:100%;height:auto;border-radius:8px} h1,h2,h3,h4,h5{line-height:1.25;color:$heading} h1{font-size:1.7em;margin-top:.35em} h2{font-size:1.3em;margin-top:1.45em} h3{font-size:1.12em;margin-top:1.3em} h4{font-size:1em;margin-top:1.2em} h5{font-size:.9em;margin-top:1.1em} p{margin:.6em 0} ul{padding-left:1.35em}
             pre.markbook-raw{margin:.6em 0;padding:10px 12px;border-left:3px solid $rawBorder;border-radius:6px;background:$rawBackground;color:$rawText;font-family:monospace;font-size:.9em;line-height:1.5;white-space:pre-wrap;word-break:break-word;user-select:text}</style></head>
             <body><div id="editor" contenteditable="true" spellcheck="true">$body</div></body>
             <script>
@@ -195,6 +200,8 @@ object MarkdownCodec {
                 if (tag === 'h1') return '# ' + out.trim() + '\n';
                 if (tag === 'h2') return '## ' + out.trim() + '\n';
                 if (tag === 'h3') return '### ' + out.trim() + '\n';
+                if (tag === 'h4') return '#### ' + out.trim() + '\n';
+                if (tag === 'h5') return '##### ' + out.trim() + '\n';
                 if (tag === 'li') return '- ' + out.trim() + '\n';
                 if (tag === 'ul' || tag === 'ol') return out;
                 if (tag === 'strong' || tag === 'b') return '**' + out + '**';
@@ -205,6 +212,56 @@ object MarkdownCodec {
                 return out;
               }
               var editor = document.getElementById('editor');
+              var lastRange = null;
+              function selectionBelongsToEditor(selection) {
+                return !!(selection && selection.rangeCount &&
+                  editor.contains(selection.getRangeAt(0).commonAncestorContainer));
+              }
+              function rememberSelection() {
+                var selection = window.getSelection();
+                if (selectionBelongsToEditor(selection)) lastRange = selection.getRangeAt(0).cloneRange();
+              }
+              function restoreSelection() {
+                editor.focus();
+                if (!lastRange) return;
+                var selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(lastRange);
+              }
+              function notifyChange() {
+                if (window.Android) Android.onChanged();
+              }
+              function selectedText() {
+                var selection = window.getSelection();
+                return selectionBelongsToEditor(selection) ? selection.toString() : '';
+              }
+              function applyFormat(command, value) {
+                restoreSelection();
+                var changed = false;
+                if (command === 'undo' || command === 'redo' || command === 'bold' || command === 'italic') {
+                  changed = document.execCommand(command, false, null);
+                } else if (command === 'heading') {
+                  changed = document.execCommand('formatBlock', false, value || 'p');
+                } else if (command === 'tag') {
+                  changed = document.execCommand('insertText', false, '#' + value);
+                } else if (command === 'link') {
+                  if (selectedText()) {
+                    changed = document.execCommand('createLink', false, value);
+                  } else {
+                    var link = document.createElement('a');
+                    link.href = value;
+                    link.textContent = '链接文字';
+                    changed = document.execCommand('insertHTML', false, link.outerHTML);
+                  }
+                } else if (command === 'table') {
+                  changed = document.execCommand(
+                    'insertText', false, '\n| 标题 1 | 标题 2 |\n| --- | --- |\n| 内容 | 内容 |\n'
+                  );
+                }
+                rememberSelection();
+                if (changed) notifyChange();
+                return changed;
+              }
               function serialize() {
                 rawBlocks = [];
                 var value = md(editor).replace(/\n+${'$'}/, '') + '\n';
@@ -233,8 +290,12 @@ object MarkdownCodec {
                     selection.removeAllRanges(); selection.addRange(range); editor.focus(); return true;
                   }
                   return false;
-                }
+                },
+                applyFormat: applyFormat
               };
+              document.addEventListener('selectionchange', rememberSelection);
+              editor.addEventListener('keyup', rememberSelection);
+              editor.addEventListener('mouseup', rememberSelection);
               editor.addEventListener('paste', function(event) {
                 event.preventDefault();
                 var clipboard = event.clipboardData || window.clipboardData;
@@ -261,12 +322,16 @@ object MarkdownCodec {
             last = matcher.end()
         }
         out.append(emphasize(escapeHtml(value.substring(last))))
-        return out.toString()
+        return linkify(out.toString())
     }
 
     private fun emphasize(escaped: String): String = escaped
         .replace(BOLD_PATTERN, "<strong>$1</strong>")
         .replace(ITALIC_PATTERN, "<em>$1</em>")
+
+    private fun linkify(value: String): String = LINK_PATTERN.replace(value) { match ->
+        "<a href=\"${match.groupValues[2]}\">${match.groupValues[1]}</a>"
+    }
 
     private fun escapeHtml(value: String): String = buildString(value.length) {
         for (character in value) {

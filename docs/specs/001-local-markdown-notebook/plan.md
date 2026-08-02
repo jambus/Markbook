@@ -29,3 +29,5 @@
 3. 增加 Markdown 预览和可重建全文索引。
 4. 优先完成 HarmonyOS 4 APK 的单测、1,000 篇性能测试及 Mate 60 真机验收。
 5. 在 HarmonyOS 5/6 HAP 中对齐行为并通过同一组数据样例。
+6. 为 Android APK 实现可访问的底部 Markdown 工具栏；随后在 HAP 对齐相同的 Markdown
+   结果、选区语义、取消行为和验收样例。

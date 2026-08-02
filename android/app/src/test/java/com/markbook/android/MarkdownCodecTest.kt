@@ -31,8 +31,11 @@ class MarkdownCodecTest {
 
     @Test
     fun headingsAndParagraphsStayEditable() {
-        val html = render("# Title\n\nBody text\n")
-        assertEquals("<h1>Title</h1><p><br></p><p>Body text</p>", html)
+        val html = render("# Title\n#### Detail\n##### Fine detail\n\nBody text\n")
+        assertEquals(
+            "<h1>Title</h1><h4>Detail</h4><h5>Fine detail</h5><p><br></p><p>Body text</p>",
+            html
+        )
     }
 
     @Test
@@ -129,6 +132,14 @@ class MarkdownCodecTest {
     @Test
     fun emphasisIsRendered() {
         assertEquals("<p><strong>bold</strong> and <em>italic</em></p>", render("**bold** and *italic*\n"))
+    }
+
+    @Test
+    fun standardMarkdownLinksStayEditable() {
+        assertEquals(
+            "<p>Read <a href=\"https://obsidian.md\">Obsidian</a></p>",
+            render("Read [Obsidian](https://obsidian.md)\n")
+        )
     }
 
     @Test

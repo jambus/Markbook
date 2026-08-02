@@ -21,11 +21,13 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
+import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.EditText
 import com.google.android.gms.common.api.ApiException
 import java.io.File
 import java.io.FileInputStream
@@ -883,6 +885,7 @@ class MainActivity : Activity() {
         }
         webView = editor
         root.addView(editor, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(markdownToolbar(), matchWrap())
         setContentView(root)
         val content = repository.readText(note) ?: "# ${note.name.removeSuffix(".md")}\n\n"
         editor.loadDataWithBaseURL(null, renderNote(content), "text/html", "UTF-8", null)
@@ -890,6 +893,117 @@ class MainActivity : Activity() {
 
     private fun renderNote(content: String): String =
         MarkdownCodec.toHtml(content, repository::htmlAttachmentUrl, isNightTheme())
+
+    private fun markdownToolbar(): View = HorizontalScrollView(this).apply {
+        isHorizontalScrollBarEnabled = false
+        background = colorBlock(COLOR_SURFACE)
+        setPadding(dp(12), dp(6), dp(12), dp(10))
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, dp(4), 0)
+            background = rounded(COLOR_ROW, dp(24))
+            addView(formatIconAction(R.drawable.ic_editor_undo, "撤销") { applyEditorFormat("undo") })
+            addView(formatIconAction(R.drawable.ic_editor_redo, "重做") { applyEditorFormat("redo") })
+            addView(formatIconAction(R.drawable.ic_editor_heading, "标题格式") { showHeadingPicker() })
+            addView(formatIconAction(R.drawable.ic_editor_bold, "加粗") { applyEditorFormat("bold") })
+            addView(formatIconAction(R.drawable.ic_editor_italic, "斜体") { applyEditorFormat("italic") })
+            addView(formatIconAction(R.drawable.ic_editor_tag, "添加标签") { promptForTag() })
+            addView(formatIconAction(R.drawable.ic_editor_link, "添加链接") { promptForLink() })
+            addView(formatIconAction(R.drawable.ic_editor_table, "插入表格") { applyEditorFormat("table") })
+        }, LinearLayout.LayoutParams(-2, dp(44)))
+    }
+
+    private fun formatIconAction(icon: Int, label: String, onClick: () -> Unit): ImageButton = ImageButton(this).apply {
+        setImageResource(icon)
+        setColorFilter(COLOR_PRIMARY_TEXT)
+        scaleType = android.widget.ImageView.ScaleType.CENTER
+        minimumWidth = dp(44)
+        minimumHeight = dp(44)
+        setPadding(dp(10), dp(10), dp(10), dp(10))
+        val ripple = android.util.TypedValue()
+        this@MainActivity.theme.resolveAttribute(
+            android.R.attr.selectableItemBackgroundBorderless,
+            ripple,
+            true
+        )
+        if (ripple.resourceId != 0) setBackgroundResource(ripple.resourceId)
+        isClickable = true
+        isFocusable = true
+        contentDescription = label
+        tooltipText = label
+        setOnClickListener { onClick() }
+    }
+
+    private fun applyEditorFormat(command: String, value: String? = null) {
+        val editor = webView ?: return
+        val commandArgument = org.json.JSONObject.quote(command)
+        val valueArgument = value?.let { org.json.JSONObject.quote(it) } ?: "null"
+        editor.evaluateJavascript(
+            "window.markbook && window.markbook.applyFormat ? window.markbook.applyFormat($commandArgument, $valueArgument) : false",
+            null
+        )
+    }
+
+    private fun showHeadingPicker() {
+        val labels = arrayOf("正文", "一级标题 H1", "二级标题 H2", "三级标题 H3", "四级标题 H4", "五级标题 H5")
+        val values = arrayOf("p", "h1", "h2", "h3", "h4", "h5")
+        AlertDialog.Builder(this)
+            .setTitle("标题格式")
+            .setItems(labels) { _, index -> applyEditorFormat("heading", values[index]) }
+            .show()
+    }
+
+    private fun promptForTag() {
+        promptForEditorValue("添加标签", "标签名，例如 项目", "添加") { value ->
+            val tag = value.trim().removePrefix("#")
+            when {
+                tag.isBlank() -> "标签不能为空"
+                tag.any { it == '/' || it == '\\' } -> "标签不能包含路径分隔符"
+                tag.any { it.isWhitespace() } -> "标签不能包含空格"
+                else -> {
+                    applyEditorFormat("tag", tag)
+                    null
+                }
+            }
+        }
+    }
+
+    private fun promptForLink() {
+        promptForEditorValue("添加链接", "https://example.com", "添加") { value ->
+            val link = value.trim()
+            if (link.isBlank()) "链接不能为空" else {
+                applyEditorFormat("link", link)
+                null
+            }
+        }
+    }
+
+    private fun promptForEditorValue(
+        title: String,
+        hint: String,
+        confirmLabel: String,
+        onConfirm: (String) -> String?
+    ) {
+        val input = EditText(this).apply {
+            this.hint = hint
+            setSingleLine(true)
+            setPadding(dp(24), dp(4), dp(24), dp(4))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton(confirmLabel, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val error = onConfirm(input.text.toString())
+                if (error == null) dialog.dismiss() else input.error = error
+            }
+        }
+        dialog.show()
+    }
 
     private fun returnToBrowser() {
         saveCurrentNote { success ->
