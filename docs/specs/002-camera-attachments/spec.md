@@ -1,6 +1,6 @@
 # Feature Specification: 拍照与本地附件
 
-**Status**: Draft  
+**Status**: In Progress  
 **Priority**: P1  
 **Depends on**: 001-local-markdown-notebook
 

@@ -5,7 +5,7 @@
 - 本规格属于 [`docs/README.md`](../../README.md) 定义的「加固」类，只消除已交付实现与既有规格之间的偏差，不新增能力。
 - 范围限于 `android/` 模块，对应规格 `005` 交付的 HarmonyOS 4 Android APK。
 - 当前实现为单 `Activity` + 程序化 View + `WebView` 内 `contenteditable` 编辑器，Vault 访问经由 SAF (`DocumentsContract`)。
-- `docs/specs/004-harmony-4-5-compatibility/contracts/vault-contract.md` 是文件格式、附件路径与保存事务语义的唯一契约来源。
+- `docs/contracts/vault-contract.md` 是文件格式、附件路径与保存事务语义的唯一契约来源。
 - `docs/design/note_editor.md` 与 `docs/design/capture_flow.md` 定义用户可见的状态与恢复路径；本规格不改变这些行为，只让实现与之相符。
 - `docs/design/components.md` 与 `003-remote-sync` 已要求同步状态离开进度页后仍可发现；
   本规格只加固 Android 现有实现的生命周期，不改变同步算法和数据范围。

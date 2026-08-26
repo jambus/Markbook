@@ -1,9 +1,34 @@
-# Quickstart: HarmonyOS 4 APK 验收
+# Quickstart: HarmonyOS 4 APK 构建与验收
 
-1. 从 `android/` 执行 `./gradlew :app:assembleDebug`。
-2. 将 debug APK 安装到 HarmonyOS 4 Mate 60。
-3. 选择现有 Obsidian Vault 并创建当天每日笔记。
-4. 输入中文、列表、标签和双向链接，等待自动保存后强制结束应用。
-5. 重新打开并验证内容一致，再测试直接拍照、裁剪和四点透视校正。
-6. 重启手机后确认 Vault 授权和附件相对链接仍然有效。
-7. 在电脑 Obsidian 打开该 Vault，确认无需转换即可读取。
+## 前置条件
+
+- Mate 60 使用 HarmonyOS 4，开启开发者模式和 USB 调试。
+- 连接后保持手机解锁，并在手机上确认本电脑的 USB 调试/调试密钥授权提示。
+- 准备一个已有 Obsidian Vault，并确认电脑端 Obsidian 可以打开它。
+- 使用 Java 11+ 从 `android/` 执行 `./gradlew :app:testDebugUnitTest :app:assembleDebug`。
+- 待安装 APK 为 `android/app/build/outputs/apk/debug/app-debug.apk`。
+
+连接设备后可运行 `./scripts/install-apk.sh` 自动选择 `adb` 或 `hdc` 安装 APK。
+若脚本提示 `connect-key`，先在手机确认调试密钥，再重新执行，不要跳过授权继续验收。
+
+## 验收步骤
+
+1. 安装 APK，记录设备型号、HarmonyOS 版本、Android 兼容层 API、APK 版本和构建来源。
+2. 首次打开应用，选择已有 Vault；确认没有生成 Markbook 私有正文副本或数据库。
+3. 创建或打开当天笔记，输入中文、标题、列表、标签和 `[[双向链接]]`；分别等待自动
+   保存和触发手动保存。
+4. 关闭并重新打开应用，确认内容仍在原 Vault 中；重启手机后再次确认目录授权有效。
+5. 拍照后分别测试直接插入、矩形裁剪和四点透视校正，并连续插入至少两张照片。
+6. 检查 `assets/<笔记文件名>/` 中存在同一拍摄 ID 的 `o`、`c` 文件；Markdown 使用
+   Vault 内相对链接且默认指向校正图。
+7. 分别在照片写入和正文保存过程中强制结束应用；重启后不得出现死链接、孤儿附件、
+   静默副本或无法解释的临时事务文件。
+8. 在系统设置中撤销目录权限；重新打开后应要求重新选择 Vault，重新授权后继续编辑
+   原目录，不得创建替代 Vault。
+9. 在最大系统字体下分别使用竖屏和横屏完成文件浏览、编辑、保存和照片处理。
+10. 在电脑 Obsidian 中打开同一 Vault，确认中文、Markdown 结构和校正图片无需转换即可读取。
+
+## 记录结果
+
+记录每一步的通过/失败、截图、脱敏日志、设备信息、APK 版本和生成文件名。任何未执行
+步骤都不能标记为通过；该清单完成前，Android `0.1.x` 只能标记为开发基线或候选版本。

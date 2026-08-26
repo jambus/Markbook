@@ -133,7 +133,7 @@ Vault 读写也不会长时间阻塞键盘、滚动或返回操作。
 
 | 需求 | 还原的原始约束 |
 | --- | --- |
-| FR-801、FR-802、FR-803 | `004` 的 [共享 Vault 契约](../004-harmony-4-5-compatibility/contracts/vault-contract.md)：Markdown 与相对链接必须可被 Obsidian 等工具原样理解 |
+| FR-801、FR-802、FR-803 | [共享 Vault 契约](../../contracts/vault-contract.md)：Markdown 与相对链接必须可被 Obsidian 等工具原样理解 |
 | FR-804 | [设计原则](../../design/design_principles.md) 第 1 条「文件优先，所有权归用户」：不得静默改写用户内容 |
 | FR-805、FR-807 | [设计原则](../../design/design_principles.md) 第 2 条「记录应当即时，保存应当可信」与第 6 条「让状态可见」 |
 | FR-806 | `004` 的保存事务与恢复语义 |

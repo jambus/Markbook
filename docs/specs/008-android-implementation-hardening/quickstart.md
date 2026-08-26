@@ -94,4 +94,5 @@ cd android
 
 ## 记录
 
-每次真机验收将结果写入 `device-acceptance.md` 风格的记录中，未通过项须注明受影响平台、用户影响与后续计划。
+每次真机验收按 [`../005-harmonyos4-android-apk/quickstart.md`](../005-harmonyos4-android-apk/quickstart.md)
+记录设备、系统、APK 版本、步骤结果和例外；未通过项须注明用户影响与后续计划。

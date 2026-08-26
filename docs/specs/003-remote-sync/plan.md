@@ -33,4 +33,5 @@ Drive Vault 文件夹选择与新建、首次范围确认、递归比较、上�
 SharedPreferences、Vault 或日志。
 
 首阶段每轮重新列出远端，且不传播删除；它是安全可用的电脑 Obsidian 互通基础，而非
-完整的增量同步实现。完成后再接入 Drive changes 游标、条件写入、可恢复上传和删除回收站。
+完整的增量同步实现。完成后再接入 Drive changes 游标、条件写入、可恢复上传和远端
+Provider 回收站；本地 `.trash/` 始终排除在同步范围外。

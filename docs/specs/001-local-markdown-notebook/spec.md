@@ -1,6 +1,6 @@
 # Feature Specification: Obsidian Vault 本地笔记
 
-**Status**: Draft  
+**Status**: In Progress  
 **Priority**: P1  
 **Depends on**: None
 

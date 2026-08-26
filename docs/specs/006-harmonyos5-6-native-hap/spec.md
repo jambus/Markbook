@@ -1,6 +1,6 @@
 # Feature Specification: HarmonyOS 5/6 原生 HAP
 
-**Status**: Planned
+**Status**: In Progress
 **Priority**: P2
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
 004-harmony-4-5-compatibility, 005-harmonyos4-android-apk

@@ -1,8 +1,9 @@
 # Feature Specification: Google Drive 与 NAS 同步
 
-**Status**: In progress (Android Google Drive manual sync)
+**Status**: In Progress
 **Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments
+**Current Slice**: Android Google Drive manual sync
 
 ## User Stories
 
@@ -39,8 +40,8 @@ Mate 60 用户在 Android APK 中登录已有 Google 账号，选择一个已有
   用户把密码交给 Markbook。
 - **FR-303** NAS Provider 必须支持威联通 TS-251D 和极空间的局域网、外网访问；
   具体通用协议须通过真实设备验证，不得依赖单一厂商私有 API。
-- **FR-304** 首版必须双向同步整个 Vault 的 Markdown、照片附件和回收站内容，
-  但不得主动同步 `.obsidian/` 配置目录或本机索引元数据。
+- **FR-304** 完整同步范围包括 Vault 中的 Markdown 和照片附件，但不得同步
+  `.obsidian/`、本机索引、同步基线、临时文件或本地 `.trash/`。
 - **FR-305** 双边修改不得静默覆盖，默认保留冲突副本。
 - **FR-306** 同步必须可取消、可重试并提供文件级错误摘要。
 - **FR-307** 只有完整成功后才能更新同步基线。
@@ -51,8 +52,8 @@ Mate 60 用户在 Android APK 中登录已有 Google 账号，选择一个已有
   当前目标的同步或明确提示未同步内容。
 - **FR-311** 同步必须支持增量传输、断点恢复、取消、重试和文件级错误摘要，
   面向几十 GB、较多照片的 Vault 不得每次全量上传。
-- **FR-312** 删除操作必须同步到远端回收站，不得直接静默永久删除。
-- **FR-313** 双边修改不得静默覆盖，默认保留带设备或时间信息的冲突副本。
+- **FR-312** 后续启用删除传播时，远端删除必须进入 Provider 提供的可恢复回收站，
+  不得永久删除；本地 `.trash/` 仍不作为同步内容上传或下载。
 - **FR-314** Android Google Drive 首阶段使用 Google Play 服务选择账号并以官方 Drive
   REST API 访问；只保存远端文件夹标识、基线和非敏感显示信息，访问令牌由系统服务管理。
 - **FR-315** Android 首阶段必须让用户选择已有的 Drive 文件夹，并在首次实际

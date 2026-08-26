@@ -4,7 +4,8 @@
 
 本知识库是 Markbook 两端客户端（HarmonyOS 4 Android APK 与 HarmonyOS 5/6 原生 HAP）的共同体验基线。开发新的用户可见功能前，先查阅相关页面或流程；若行为变化，先更新本文档或对应专题，再更新功能规格、计划和任务。
 
-本文定义体验，不取代数据契约。Markdown、附件路径、事务恢复和冲突规则以 [004 共享 Vault 契约](../specs/004-harmony-4-5-compatibility/contracts/vault-contract.md) 为准；发生冲突时以该契约为准。
+本文定义体验，不取代数据契约。Markdown、附件路径、事务恢复和冲突规则以
+[共享 Vault 契约](../contracts/vault-contract.md) 为准；发生冲突时以该契约为准。
 
 ### 外部参考的使用方式
 

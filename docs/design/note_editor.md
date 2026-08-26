@@ -4,7 +4,8 @@
 
 编辑器服务于快速记录和可靠保存：用户编辑的是当前 Vault 内的 UTF-8 `.md` 文件，不是应用私有副本。它以所见即所得方式呈现常用 Markdown，但不得改变原有文件名、目录、相对链接或用户未触发的 Markdown 结构。
 
-数据规则以 [本地笔记规格](../specs/001-local-markdown-notebook/spec.md) 和 [共享 Vault 契约](../specs/004-harmony-4-5-compatibility/contracts/vault-contract.md) 为准。
+数据规则以 [本地笔记规格](../specs/001-local-markdown-notebook/spec.md) 和
+[共享 Vault 契约](../contracts/vault-contract.md) 为准。
 
 ## 页面结构
 

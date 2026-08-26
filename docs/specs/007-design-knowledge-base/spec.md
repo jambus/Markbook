@@ -1,12 +1,14 @@
 # Feature Specification: 项目设计知识库
 
-**Status**: In Progress  
+**Status**: Complete  
 **Priority**: P1  
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments, 004-harmony-4-5-compatibility
 
 ## Goal
 
 建立一套版本受控、可被两端客户端共同遵循的设计知识库，使每次功能开发和评审都能基于同一套体验原则、组件状态、编辑器交互与拍照流程做决策。
+
+建设工作已经完成；日常入口和持续维护规则见 [`docs/design/README.md`](../../design/README.md)。
 
 ## User Stories
 

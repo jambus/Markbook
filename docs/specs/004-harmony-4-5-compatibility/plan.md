@@ -1,10 +1,9 @@
-# Implementation Plan: Mate 双端适配
+# Implementation Plan: 共享 Vault 与跨端互操作
 
 ## Strategy
 
-采用双工程、单数据契约。仓库保留现有 HarmonyOS Stage 工程，并新增 `android/`
-Gradle 工程。Android 端使用 Kotlin，优先产出可在 Mate 60 HarmonyOS 4 安装的
-APK；HarmonyOS 端继续使用 ArkTS，面向 HarmonyOS 5/6 产出 HAP。
+采用双工程、单数据契约。Android 和 HarmonyOS 的实现及平台验收分别由 `005`、`006`
+负责，本计划只建立共享契约、样例、互操作验证和跨端发布矩阵。
 
 首版不抽取跨语言运行时代码。可共享部分限定为规格、Markdown/Vault 格式样例、
 图片变换输入输出样例和验收用例，从而降低两端耦合。
@@ -17,13 +16,14 @@ Markbook/
 │   └── app/src/
 ├── entry/                    # HarmonyOS 5/6 HAP，ArkTS/Hvigor
 ├── shared-testdata/          # 两端共同读取的 Markdown 与图片样例
+├── docs/contracts/           # 跨客户端唯一 Vault 契约
 └── docs/specs/               # 产品规格、计划和任务
 ```
 
-## Platform Boundaries
+## Interoperability Boundaries
 
-- Android：系统目录选择器及持久 URI 权限、系统相机、平台安全存储、后台任务。
-- HarmonyOS：系统文件选择 Ability、CameraPicker、Asset Store、后台任务。
+- Android 平台 API、构建和设备适配属于 `005`。
+- HarmonyOS 平台 API、构建、签名和设备适配属于 `006`。
 - 共享契约：UTF-8 `.md`、Vault 原目录、POSIX 风格相对链接、
   `assets/<note-file-stem>/`、`<HHmmss>-<xxxx>-o.<ext>` 与
   `<HHmmss>-<xxxx>-c.<ext>` 成对命名、冲突副本和回收站约定；两端继续兼容已有
@@ -32,11 +32,12 @@ Markbook/
 
 ## Delivery Phases
 
-1. 建立 Android 工程、构建 APK，并在 Mate 60 HarmonyOS 4 验证安装和目录授权。
-2. 在 Android 端完成本地编辑、自动保存和拍照校正闭环。
-3. 用共享样例校验 APK、HAP 和电脑 Obsidian 的文件互操作。
-4. 补齐 HarmonyOS 5/6 HAP 功能并执行对应真机回归。
-5. 在两端实现并验证 Google Drive/NAS 同步。
+1. 固化共享 Vault 契约和跨端样例。
+2. 用共享样例验证 APK 生成的 Markdown、附件和恢复结果。
+3. 让 HAP 重新授权并继续编辑 APK 生成的 Vault。
+4. 比较两端输出，并在电脑 Obsidian 中验证无需迁移。
+5. 验证跨端冲突、本地回收站语义和同步边界。
+6. 建立双安装包版本、签名、设备和回归矩阵。
 
 ## Constitution Check
 
