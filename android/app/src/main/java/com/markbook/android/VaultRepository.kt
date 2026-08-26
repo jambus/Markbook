@@ -226,6 +226,38 @@ class VaultRepository(private val context: Context) {
     fun saveText(uri: Uri, name: String, content: String, parentUri: Uri): Boolean =
         saveText(VaultDocument(uri, name, "text/markdown", parentUri), content)
 
+    /** Moves a note to the Vault-local trash without propagating a delete to sync providers. */
+    fun moveNoteToTrash(document: VaultDocument): Boolean {
+        val tree = savedVaultUri() ?: return false
+        val sourceParent = document.parentUri ?: return false
+        val trash = findOrCreateDirectory(tree, listOf(".trash")) ?: return false
+        val moved = try {
+            DocumentsContract.moveDocument(resolver, document.uri, sourceParent, trash)
+        } catch (_: Exception) {
+            null
+        }
+        if (moved != null) return true
+
+        // Some document providers do not implement moveDocument. Copying then deleting keeps the
+        // deletion workflow available on those providers while retaining the original on a failure.
+        val trashName = uniqueTrashName(tree, trash, document.name)
+        val copy = DocumentsContract.createDocument(resolver, trash, "text/markdown", trashName) ?: return false
+        return try {
+            resolver.openInputStream(document.uri)?.use { input ->
+                resolver.openOutputStream(copy, "wt")?.use { output -> input.copyTo(output) }
+                    ?: throw IllegalStateException("Unable to write trash copy")
+            } ?: throw IllegalStateException("Unable to read note")
+            if (!DocumentsContract.deleteDocument(resolver, document.uri)) {
+                try { DocumentsContract.deleteDocument(resolver, copy) } catch (_: Exception) { }
+                return false
+            }
+            true
+        } catch (_: Exception) {
+            try { DocumentsContract.deleteDocument(resolver, copy) } catch (_: Exception) { }
+            false
+        }
+    }
+
     fun savePhotoPair(
         noteName: String,
         original: InputStream,
@@ -463,6 +495,19 @@ class VaultRepository(private val context: Context) {
 
     private fun findChild(tree: Uri, parent: Uri, name: String): VaultDocument? {
         return listChildren(tree, parent).firstOrNull { it.name == name }
+    }
+
+    private fun uniqueTrashName(tree: Uri, trash: Uri, name: String): String {
+        if (findChild(tree, trash, name) == null) return name
+        val extension = name.substringAfterLast('.', "")
+        val stem = if (extension.isBlank()) name else name.removeSuffix(".$extension")
+        val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        repeat(100) { attempt ->
+            val suffix = if (attempt == 0) "-$timestamp" else "-$timestamp-${attempt + 1}"
+            val candidate = "$stem$suffix${if (extension.isBlank()) "" else ".$extension"}"
+            if (findChild(tree, trash, candidate) == null) return candidate
+        }
+        return "$stem-${UUID.randomUUID()}${if (extension.isBlank()) "" else ".$extension"}"
     }
 
     private fun listChildren(tree: Uri, parent: Uri): List<VaultDocument> {

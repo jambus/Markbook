@@ -3,7 +3,7 @@
 ## Notebook
 
 - `rootPath`: 应用沙箱或用户授权目录。
-- 固定子目录：`notes/`、`attachments/`、`.markbook/trash/`、`.markbook/index/`。
+- 固定子目录：`notes/`、`attachments/`、`.trash/`、`.markbook/index/`。
 
 ## Note
 
@@ -22,4 +22,3 @@
 ## Derived Index
 
 保存文件路径、标题、分词结果和内容摘要。任何时候都必须能删除后从文件重建。
-

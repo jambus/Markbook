@@ -12,8 +12,8 @@ source of truth; neither client creates a second Vault or a required database.
 ├── assets/<note-file-stem>/<HHmmss>-<xxxx>-o.<ext>
 ├── assets/<note-file-stem>/<HHmmss>-<xxxx>-c.<ext>
 ├── attachments/                         # legacy, read-only compatibility
+├── .trash/                              # local-only deleted notes
 └── .markbook/
-    ├── trash/
     └── conflicts/
 ```
 
@@ -35,8 +35,9 @@ be removed or resolved on startup. A completed note or attachment transaction
 must not be deleted merely because cleanup was interrupted. An unreferenced
 incomplete attachment transaction may be removed after its marker is examined.
 
-Deletes move files into `.markbook/trash/` with enough metadata to restore the
-original relative path; permanent deletion is a separate explicit operation.
+Deletes move notes into `.trash/`; this directory is excluded from remote sync.
+Permanent deletion is a separate explicit operation. Attachments are retained until a later
+explicit cleanup flow, because they may still be referenced by another note.
 When both sides changed the same path, keep both versions under
 `.markbook/conflicts/` or with a deterministic `冲突-<device>-<timestamp>` suffix.
 No client silently overwrites the other version.

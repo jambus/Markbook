@@ -241,9 +241,15 @@ class MainActivity : Activity() {
                 content.addView(emptyState("当前目录还没有 Markdown 笔记"), matchWrap())
             } else {
                 notes.forEach { note ->
-                    content.addView(vaultRow("•", note.name.removeSuffix(".md"), notePreview(note)) { openNote(note) }, matchWrap().apply {
-                        bottomMargin = dp(8)
-                    })
+                    content.addView(
+                        vaultRow(
+                            "•",
+                            note.name.removeSuffix(".md"),
+                            notePreview(note),
+                            trailingAction = { confirmMoveNoteToTrash(note) }
+                        ) { openNote(note) },
+                        matchWrap().apply { bottomMargin = dp(8) }
+                    )
                 }
             }
         }
@@ -833,6 +839,28 @@ class MainActivity : Activity() {
     private fun openNote(note: VaultDocument) {
         currentNote = note
         showEditor(note)
+    }
+
+    private fun confirmMoveNoteToTrash(note: VaultDocument) {
+        AlertDialog.Builder(this)
+            .setTitle("移到回收站？")
+            .setMessage("“${note.name.removeSuffix(".md")}”将移入 Vault/.trash，不会同步到 Google Drive。图片附件会保留，方便之后恢复或清理。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("移到回收站") { _, _ ->
+                Thread {
+                    val success = repository.moveNoteToTrash(note)
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        if (success) {
+                            toast("已移到回收站")
+                            showVaultBrowser()
+                        } else {
+                            toast("无法移到回收站，请检查 Vault 权限")
+                        }
+                    }
+                }.start()
+            }
+            .show()
     }
 
     private fun showEditor(note: VaultDocument) {
@@ -1431,7 +1459,13 @@ class MainActivity : Activity() {
         return "$vault · $location · ${note.name}"
     }
 
-    private fun vaultRow(icon: String, title: String, subtitle: String, action: () -> Unit): View = LinearLayout(this).apply {
+    private fun vaultRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        trailingAction: (() -> Unit)? = null,
+        action: () -> Unit
+    ): View = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = dp(64)
@@ -1464,12 +1498,19 @@ class MainActivity : Activity() {
                 setPadding(0, dp(3), 0, 0)
             }, matchWrap())
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(TextView(this@MainActivity).apply {
-            text = "›"
-            textSize = 26f
-            gravity = Gravity.CENTER
-            setTextColor(COLOR_MUTED_TEXT)
-        }, LinearLayout.LayoutParams(dp(28), dp(44)))
+        if (trailingAction == null) {
+            addView(TextView(this@MainActivity).apply {
+                text = "›"
+                textSize = 26f
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_MUTED_TEXT)
+            }, LinearLayout.LayoutParams(dp(28), dp(44)))
+        } else {
+            addView(
+                formatIconAction(R.drawable.ic_note_delete, "删除笔记", trailingAction),
+                LinearLayout.LayoutParams(dp(44), dp(44))
+            )
+        }
     }
 
     private fun settingsRow(title: String, subtitle: String, selected: Boolean, action: () -> Unit): View = LinearLayout(this).apply {
