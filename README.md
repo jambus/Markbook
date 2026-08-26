@@ -13,9 +13,13 @@ Spec Kit 的规格驱动流程推进。
 ## 当前工程状态
 
 - `entry/` 已包含 HarmonyOS HAP 的本地笔记和拍照基础实现。
-- `android/` 将作为下一阶段优先建立的 HarmonyOS 4 APK 工程。
+- `android/` 已形成 HarmonyOS 4 APK 的 `0.1.0` 开发基线，包含 Vault 文件库、
+  Markdown 编辑、拍照处理、设置与初始 Google Drive 同步流程。
 - 两端以用户选择的 Obsidian Vault 为事实源。
 - `SyncProvider` 契约为 Google Drive 和 NAS 同步预留统一语义。
+
+版本功能范围、验证状态和后续迭代统一记录在
+[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)。
 
 ## 工程环境
 

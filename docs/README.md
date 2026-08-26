@@ -10,6 +10,7 @@
 ```text
 docs/
 ├── constitution.md                    # 不可协商的项目原则
+├── RELEASE_NOTES.md                   # 版本范围、发布状态与迭代记录
 ├── product/
 │   ├── vision.md
 │   ├── roadmap.md
@@ -62,7 +63,13 @@ docs/
   只在加固规格里记录。
 
 `008` 即按此规则建立：它只处理 `005` 已交付的 Android 实现中违反 `001`、`002`、
-`004` 契约与 `design/` 体验规则的部分，不改变任何功能范围。
+`003`、`004` 契约与 `design/` 体验规则的部分，不改变任何功能范围。
+
+## 版本与发布记录
+
+当前 Android APK 以 `0.1.0` 作为首个开发基线。版本范围、验证状态和每次迭代摘要统一
+维护在 [`RELEASE_NOTES.md`](RELEASE_NOTES.md)；安装包中的 `versionName`、单调递增的
+`versionCode`、平台规格和 release notes 必须在候选版本生成前保持一致。
 
 ## 每个编号目录的文件
 

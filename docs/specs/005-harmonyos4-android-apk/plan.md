@@ -3,6 +3,8 @@
 ## Technical Context
 
 - Kotlin Android 工程位于 `android/`，使用项目内 Gradle Wrapper。
+- 当前安装包基线为 `versionName 0.1.0`、`versionCode 1`；后续候选版本按
+  [`docs/RELEASE_NOTES.md`](../../RELEASE_NOTES.md) 的规则提升并记录。
 - 通过 Storage Access Framework 选择 Vault 并持久化目录 URI 权限。
 - 通过 Activity Result API 拉起系统相机并复制返回内容。
 - 平台状态使用 Android 系统安全存储；Markdown 与图片只写入 Vault。
@@ -19,6 +21,8 @@
 7. 增加设置页，持久保存显示模式和每日笔记目录；目录变更只影响后续每日笔记的创建位置与相对链接计算。
 8. 根据 UI 评审完成拍照处理默认选区、模式选中态、原编辑位置插入、持续写入反馈、文件库恢复状态和跨端视觉语义统一。
 9. 在设置页显示版本、构建号和当前语言能力；中文为首发语言，完整中英文国际化作为后续独立交付。
+10. 将当前已实现功能归档为 Android APK `0.1.0` 开发基线，并在每次候选构建前同步
+    release notes、平台规格、`versionName` 与单调递增的 `versionCode`。
 
 ## Constitution Check
 
