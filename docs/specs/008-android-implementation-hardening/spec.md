@@ -82,7 +82,8 @@ Vault 读写也不会长时间阻塞键盘、滚动或返回操作。
 
 - **FR-801** Markdown 往返必须无损：应用不得因渲染或序列化改变用户未编辑的正文，包括缩进、空行数量、块级结构与 `<`、`&` 等字符的原始写法。
 - **FR-802** 编辑器无法保真编辑的块级结构（围栏代码块、缩进代码块、表格、有序列表、嵌套列表、引用块、水平线、任务列表、YAML front matter）必须以原文逐字保留并回写。
-- **FR-803** 链接必须以原始 Markdown 目标回写，不得被规范化为绝对 URL；相对路径语义以 `004` 的 Vault 契约为准。
+- **FR-803** 链接必须以原始 Markdown 目标回写，不得被规范化为绝对 URL；相对路径语义以
+  [`docs/contracts/vault-contract.md`](../../contracts/vault-contract.md) 为准。
 - **FR-804** 未发生用户编辑的笔记不得被写入。
 
 ### 保存与恢复
@@ -136,7 +137,7 @@ Vault 读写也不会长时间阻塞键盘、滚动或返回操作。
 | FR-801、FR-802、FR-803 | [共享 Vault 契约](../../contracts/vault-contract.md)：Markdown 与相对链接必须可被 Obsidian 等工具原样理解 |
 | FR-804 | [设计原则](../../design/design_principles.md) 第 1 条「文件优先，所有权归用户」：不得静默改写用户内容 |
 | FR-805、FR-807 | [设计原则](../../design/design_principles.md) 第 2 条「记录应当即时，保存应当可信」与第 6 条「让状态可见」 |
-| FR-806 | `004` 的保存事务与恢复语义 |
+| FR-806 | [共享 Vault 契约](../../contracts/vault-contract.md)的保存事务与恢复语义 |
 | FR-808 | [设计原则](../../design/design_principles.md) 第 8 条「导航保留方向与上下文」 |
 | FR-809、FR-810、FR-811 | [设计原则](../../design/design_principles.md) 第 2 条：现场记录必须足够快速 |
 | FR-812、FR-813、FR-814 | `002` 的[拍照附件规格](../002-camera-attachments/spec.md)与[拍照流程](../../design/capture_flow.md)：失败不得改写已保存正文 |

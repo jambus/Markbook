@@ -3,7 +3,7 @@
 ## Technical Context
 
 - Kotlin Android 工程位于 `android/`，使用项目内 Gradle Wrapper。
-- 当前安装包基线为 `versionName 0.1.0`、`versionCode 1`；后续候选版本按
+- 当前开发版本为 `versionName 0.1.1`、`versionCode 2`；后续候选版本按
   [`docs/RELEASE_NOTES.md`](../../RELEASE_NOTES.md) 的规则提升并记录。
 - 通过 Storage Access Framework 选择 Vault 并持久化目录 URI 权限。
 - 通过 Activity Result API 拉起系统相机并复制返回内容。

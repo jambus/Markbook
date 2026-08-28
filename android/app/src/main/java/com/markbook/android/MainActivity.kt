@@ -43,19 +43,26 @@ class MainActivity : Activity() {
     private lateinit var drivePreferences: DriveSyncPreferences
     private lateinit var driveAuth: GoogleDriveAuth
     private val driveExecutor = Executors.newSingleThreadExecutor()
+    private val noteIoExecutor = Executors.newSingleThreadExecutor()
     private var webView: WebView? = null
     private var statusView: TextView? = null
+    private var saveActionView: TextView? = null
     private val handler = Handler(Looper.getMainLooper())
     private val autosave = Runnable { saveCurrentNote() }
-    private var documentDirty = false
+    private val saveCoordinator = RevisionSaveCoordinator()
+    private val saveWaiters = mutableListOf<(Boolean) -> Unit>()
+    private var editorGeneration = 0L
     private var currentNote: VaultDocument? = null
     private var browserDirectory: VaultDocument? = null
+    private var currentVaultName = "Vault"
     private val browserPath = mutableListOf<String>()
     private val browserHistory = mutableListOf<VaultDocument>()
     private var browserScrollY = 0
+    private var browserLoadGeneration = 0L
     private var dailyFolderDirectory: VaultDocument? = null
     private val dailyFolderPath = mutableListOf<String>()
     private val dailyFolderHistory = mutableListOf<VaultDocument>()
+    private var dailyFolderLoadGeneration = 0L
     private var captureFile: File? = null
     private var captureUri: Uri? = null
     private var editorView: PhotoEditorView? = null
@@ -67,9 +74,6 @@ class MainActivity : Activity() {
     private var photoContextScrollY = 0
     private var pendingEditorScrollY: Int? = null
     private var pendingCaretImagePath: String? = null
-    private var savePending = false
-    private var queuedExtra: String? = null
-    private val queuedCompletions = mutableListOf<(Boolean) -> Unit>()
     private var screen = Screen.WELCOME
     private var driveFolderDirectory = DriveVaultRoot("root", "我的云端硬盘")
     private val driveFolderHistory = mutableListOf<DriveVaultRoot>()
@@ -85,7 +89,7 @@ class MainActivity : Activity() {
         drivePreferences = DriveSyncPreferences(this)
         driveAuth = GoogleDriveAuth(this)
         applyWindowColors()
-        if (repository.savedVaultUri() == null) showWelcome() else showVaultBrowser()
+        if (repository.savedVaultUri() == null) showWelcome() else recoverVaultAndOpenBrowser()
     }
 
     override fun onPause() {
@@ -97,6 +101,7 @@ class MainActivity : Activity() {
         handler.removeCallbacks(autosave)
         driveSyncCancelled?.set(true)
         driveExecutor.shutdownNow()
+        noteIoExecutor.shutdownNow()
         releaseEditor()
         super.onDestroy()
     }
@@ -106,11 +111,13 @@ class MainActivity : Activity() {
      * repeated navigation from accumulating renderer processes.
      */
     private fun releaseEditor() {
-        val editor = webView ?: return
+        editorGeneration += 1L
+        val editor = webView
         webView = null
         statusView = null
-        savePending = false
+        saveActionView = null
         handler.removeCallbacks(autosave)
+        if (editor == null) return
         (editor.parent as? android.view.ViewGroup)?.removeView(editor)
         editor.stopLoading()
         editor.destroy()
@@ -120,6 +127,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when (screen) {
             Screen.EDITOR -> returnToBrowser()
+            Screen.EDITOR_LOADING, Screen.EDITOR_ERROR -> showVaultBrowser()
             Screen.BROWSER -> {
                 if (browserPath.isNotEmpty()) showParentDirectory() else super.onBackPressed()
             }
@@ -130,6 +138,38 @@ class MainActivity : Activity() {
             Screen.DRIVE_FOLDER_PICKER, Screen.DRIVE_CONFIRM -> showDriveSetup()
             Screen.DRIVE_PROGRESS -> showSettings()
             Screen.WELCOME -> super.onBackPressed()
+        }
+    }
+
+    private fun recoverVaultAndOpenBrowser() {
+        releaseEditor()
+        screen = Screen.BROWSER
+        val root = pageRoot(COLOR_BACKGROUND).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(32), dp(24), dp(24))
+        }
+        root.addView(TextView(this).apply {
+            text = "正在检查 Vault…"
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setTextColor(COLOR_SECONDARY_TEXT)
+        }, matchWrap())
+        setContentView(root)
+        noteIoExecutor.execute {
+            val result = repository.recoverVault()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when (result) {
+                    VaultRecoveryResult.Success -> showVaultBrowser(true)
+                    is VaultRecoveryResult.Failure -> showWelcome(
+                        if (result.kind == VaultFailureKind.PERMISSION_DENIED) {
+                            "无法访问 Vault，请重新选择"
+                        } else {
+                            "无法检查当前 Vault，原文件未被修改，请重新选择或稍后重试"
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -179,20 +219,63 @@ class MainActivity : Activity() {
     }
 
     private fun showVaultBrowser(resetToRoot: Boolean = false) {
-        val rootDirectory = repository.vaultRoot()
-        if (rootDirectory == null) {
-            showWelcome("无法访问 Vault，请重新选择")
-            return
-        }
-        if (resetToRoot || browserDirectory == null) {
-            browserDirectory = rootDirectory
+        if (resetToRoot) {
+            browserDirectory = null
             browserPath.clear()
             browserHistory.clear()
             browserScrollY = 0
         }
-        val directory = browserDirectory ?: rootDirectory
         releaseEditor()
         screen = Screen.BROWSER
+        val generation = ++browserLoadGeneration
+        val requestedDirectory = browserDirectory
+        val loadingRoot = pageRoot(COLOR_BACKGROUND)
+        loadingRoot.addView(browserHeader(), matchWrap())
+        loadingRoot.addView(emptyState("正在读取 Vault…"), matchWrap().apply {
+            leftMargin = dp(16)
+            rightMargin = dp(16)
+            topMargin = dp(20)
+        })
+        setContentView(loadingRoot)
+        noteIoExecutor.execute {
+            val rootDirectory = repository.vaultRoot()
+            if (rootDirectory == null) {
+                runOnUiThread {
+                    if (browserRequestIsCurrent(generation)) showWelcome("无法访问 Vault，请重新选择")
+                }
+                return@execute
+            }
+            val directory = requestedDirectory ?: rootDirectory
+            val directoryReadable = repository.canReadDirectory(directory)
+            val children = if (directoryReadable) {
+                repository.children(directory)
+                    .filterNot { isInternalDocument(it) }
+                    .sortedWith(compareBy<VaultDocument> { !repository.isDirectory(it) }
+                        .thenBy { it.name.lowercase() })
+            } else {
+                emptyList()
+            }
+            val previews = children
+                .filter { !repository.isDirectory(it) && it.name.endsWith(".md", true) }
+                .associate { it.uri.toString() to notePreview(it) }
+            runOnUiThread {
+                if (!browserRequestIsCurrent(generation)) return@runOnUiThread
+                currentVaultName = rootDirectory.name
+                if (requestedDirectory == null) browserDirectory = rootDirectory
+                renderVaultBrowser(rootDirectory, directoryReadable, children, previews)
+            }
+        }
+    }
+
+    private fun browserRequestIsCurrent(generation: Long): Boolean =
+        !isFinishing && !isDestroyed && screen == Screen.BROWSER && browserLoadGeneration == generation
+
+    private fun renderVaultBrowser(
+        rootDirectory: VaultDocument,
+        directoryReadable: Boolean,
+        children: List<VaultDocument>,
+        previews: Map<String, String>
+    ) {
         val root = pageRoot(COLOR_BACKGROUND)
         root.addView(browserHeader(), matchWrap())
         root.addView(TextView(this).apply {
@@ -216,10 +299,6 @@ class MainActivity : Activity() {
                 bottomMargin = dp(8)
             })
         }
-        val directoryReadable = repository.canReadDirectory(directory)
-        val children = repository.children(directory)
-            .filterNot { isInternalDocument(it) }
-            .sortedWith(compareBy<VaultDocument> { !repository.isDirectory(it) }.thenBy { it.name.lowercase() })
         val folders = children.filter { repository.isDirectory(it) }
         val notes = children.filter { !repository.isDirectory(it) && it.name.endsWith(".md", true) }
 
@@ -245,7 +324,7 @@ class MainActivity : Activity() {
                         vaultRow(
                             "•",
                             note.name.removeSuffix(".md"),
-                            notePreview(note),
+                            previews[note.uri.toString()] ?: "空白笔记",
                             trailingAction = { confirmMoveNoteToTrash(note) }
                         ) { openNote(note) },
                         matchWrap().apply { bottomMargin = dp(8) }
@@ -609,7 +688,7 @@ class MainActivity : Activity() {
             setTextColor(COLOR_PRIMARY_TEXT)
         }, matchWrap())
         content.addView(TextView(this).apply {
-            text = "本地 Vault：${repository.vaultRoot()?.name ?: "当前 Vault"}\nGoogle Drive：${rootSelection.name}\n\n将比较 Markdown 与 assets。.obsidian、.trash、临时文件和本机同步信息不会上传。\n\n同名但内容不同的文件会各保留一份冲突副本；本阶段不会删除任何一端的文件。"
+            text = "本地 Vault：$currentVaultName\nGoogle Drive：${rootSelection.name}\n\n将比较 Markdown 与 assets。.obsidian、.trash、临时文件和本机同步信息不会上传。\n\n同名但内容不同的文件会各保留一份冲突副本；本阶段不会删除任何一端的文件。"
             textSize = 15f
             setTextColor(COLOR_SECONDARY_TEXT)
             setPadding(0, dp(12), 0, dp(22))
@@ -728,17 +807,46 @@ class MainActivity : Activity() {
     }
 
     private fun showDailyFolderPicker(reset: Boolean = false) {
-        val rootDirectory = repository.vaultRoot() ?: run {
-            toast("无法访问 Vault，请重新选择")
-            return
-        }
-        if (reset || dailyFolderDirectory == null) {
-            dailyFolderDirectory = rootDirectory
+        if (reset) {
+            dailyFolderDirectory = null
             dailyFolderPath.clear()
             dailyFolderHistory.clear()
         }
-        val directory = dailyFolderDirectory ?: rootDirectory
         screen = Screen.DAILY_FOLDER_PICKER
+        val generation = ++dailyFolderLoadGeneration
+        val requestedDirectory = dailyFolderDirectory
+        val loading = pageRoot(COLOR_BACKGROUND)
+        loading.addView(simpleToolbar("‹  设置", "选择今日笔记目录") { showSettings() }, matchWrap())
+        loading.addView(emptyState("正在读取 Vault 文件夹…"), matchWrap().apply {
+            leftMargin = dp(16)
+            rightMargin = dp(16)
+            topMargin = dp(20)
+        })
+        setContentView(loading)
+        noteIoExecutor.execute {
+            val rootDirectory = repository.vaultRoot()
+            val directory = requestedDirectory ?: rootDirectory
+            val folders = if (directory == null) {
+                emptyList()
+            } else {
+                repository.children(directory)
+                    .filter { repository.isDirectory(it) && !isInternalDocument(it) }
+                    .sortedBy { it.name.lowercase() }
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || screen != Screen.DAILY_FOLDER_PICKER ||
+                    generation != dailyFolderLoadGeneration) return@runOnUiThread
+                if (rootDirectory == null || directory == null) {
+                    showWelcome("无法访问 Vault，请重新选择")
+                    return@runOnUiThread
+                }
+                if (requestedDirectory == null) dailyFolderDirectory = rootDirectory
+                renderDailyFolderPicker(folders)
+            }
+        }
+    }
+
+    private fun renderDailyFolderPicker(folders: List<VaultDocument>) {
         val root = pageRoot(COLOR_BACKGROUND)
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -773,9 +881,6 @@ class MainActivity : Activity() {
                 bottomMargin = dp(8)
             })
         }
-        val folders = repository.children(directory)
-            .filter { repository.isDirectory(it) && !isInternalDocument(it) }
-            .sortedBy { it.name.lowercase() }
         sectionLabel(content, "文件夹", folders.size)
         if (folders.isEmpty()) {
             content.addView(emptyState("当前目录没有可选子文件夹"), matchWrap())
@@ -828,17 +933,118 @@ class MainActivity : Activity() {
     }
 
     private fun openDailyNote() {
-        val note = repository.dailyNote()
-        if (note == null) {
-            toast("无法创建今日笔记，请检查 Vault 权限")
-            return
+        showNoteLoading(null, "正在打开今日笔记…")
+        val generation = editorGeneration
+        noteIoExecutor.execute {
+            val result = repository.openDailyNote()
+            runOnUiThread {
+                if (!editorRequestIsCurrent(generation)) return@runOnUiThread
+                when (result) {
+                    is DailyNoteResult.Created -> {
+                        currentNote = result.document
+                        showEditor(result.document, "")
+                    }
+                    is DailyNoteResult.Existing -> openNote(result.document)
+                    is DailyNoteResult.Failure -> showNoteOpenError(
+                        null,
+                        result.kind,
+                        "今日笔记尚未打开，Vault 内容未被修改"
+                    ) { openDailyNote() }
+                }
+            }
         }
-        openNote(note)
     }
 
     private fun openNote(note: VaultDocument) {
         currentNote = note
-        showEditor(note)
+        showNoteLoading(note, "正在读取笔记…")
+        val generation = editorGeneration
+        noteIoExecutor.execute {
+            val result = repository.readNote(note)
+            runOnUiThread {
+                if (!editorRequestIsCurrent(generation, note)) return@runOnUiThread
+                when (result) {
+                    is NoteReadResult.Success -> showEditor(note, result.content)
+                    is NoteReadResult.Failure -> showNoteOpenError(
+                        note,
+                        result.kind,
+                        "原笔记未被修改"
+                    ) { openNote(note) }
+                }
+            }
+        }
+    }
+
+    private fun showNoteLoading(note: VaultDocument?, message: String) {
+        releaseEditor()
+        currentNote = note
+        screen = Screen.EDITOR_LOADING
+        val root = pageRoot(COLOR_EDITOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  文件", note?.name?.removeSuffix(".md") ?: "今日笔记") {
+            showVaultBrowser()
+        }, matchWrap())
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(44), dp(24), dp(24))
+            addView(TextView(this@MainActivity).apply {
+                text = message
+                textSize = 16f
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_SECONDARY_TEXT)
+            }, matchWrap())
+            addView(TextView(this@MainActivity).apply {
+                text = "读取完成前不会显示默认正文或写入文件。"
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_MUTED_TEXT)
+                setPadding(0, dp(10), 0, 0)
+            }, matchWrap())
+        }
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private fun showNoteOpenError(
+        note: VaultDocument?,
+        kind: VaultFailureKind,
+        preservationMessage: String,
+        retry: () -> Unit
+    ) {
+        releaseEditor()
+        currentNote = note
+        screen = Screen.EDITOR_ERROR
+        val root = pageRoot(COLOR_EDITOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  文件", note?.name?.removeSuffix(".md") ?: "今日笔记") {
+            showVaultBrowser()
+        }, matchWrap())
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(28), dp(20), dp(24))
+            addView(TextView(this@MainActivity).apply {
+                text = if (kind == VaultFailureKind.PERMISSION_DENIED) {
+                    "无法访问当前 Vault"
+                } else {
+                    "无法读取这篇笔记"
+                }
+                textSize = 21f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(COLOR_PRIMARY_TEXT)
+            }, matchWrap())
+            addView(infoBanner("$preservationMessage。你可以重试、重新选择 Vault，或返回文件库。"),
+                matchWrap().apply { topMargin = dp(14); bottomMargin = dp(16) })
+            addView(action("重试", true, retry), matchWrap())
+            addView(action("重新选择 Vault", false) { chooseVault() }, matchWrap().apply { topMargin = dp(8) })
+            addView(action("返回文件库", false) { showVaultBrowser() }, matchWrap().apply { topMargin = dp(8) })
+        }
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+    }
+
+    private fun editorRequestIsCurrent(generation: Long, note: VaultDocument? = currentNote): Boolean {
+        if (isFinishing || isDestroyed || generation != editorGeneration) return false
+        if (screen != Screen.EDITOR_LOADING) return false
+        return note == null || currentNote?.uri == note.uri
     }
 
     private fun confirmMoveNoteToTrash(note: VaultDocument) {
@@ -863,9 +1069,10 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun showEditor(note: VaultDocument) {
+    private fun showEditor(note: VaultDocument, content: String) {
         releaseEditor()
-        documentDirty = false
+        saveCoordinator.reset()
+        saveWaiters.clear()
         screen = Screen.EDITOR
         val root = pageRoot(COLOR_EDITOR_BACKGROUND)
         val toolbar = LinearLayout(this).apply {
@@ -884,7 +1091,8 @@ class MainActivity : Activity() {
             maxLines = 1
         }, LinearLayout.LayoutParams(0, dp(44), 1f))
         toolbar.addView(action("拍照", false) { startCamera() })
-        toolbar.addView(action("保存", true) { saveCurrentNote() })
+        saveActionView = action("保存", true) { saveCurrentNote() }
+        toolbar.addView(saveActionView)
         root.addView(toolbar, matchWrap())
         root.addView(TextView(this).apply {
             text = editorContext(note)
@@ -915,8 +1123,8 @@ class MainActivity : Activity() {
         root.addView(editor, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(markdownToolbar(), matchWrap())
         setContentView(root)
-        val content = repository.readText(note) ?: "# ${note.name.removeSuffix(".md")}\n\n"
         editor.loadDataWithBaseURL(null, renderNote(content), "text/html", "UTF-8", null)
+        updateSaveStatus()
     }
 
     private fun renderNote(content: String): String =
@@ -1039,61 +1247,71 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun saveCurrentNote(extra: String? = null, onComplete: (Boolean) -> Unit = {}) {
+    private fun saveCurrentNote(onComplete: ((Boolean) -> Unit)? = null) {
         val editor = webView
         if (screen != Screen.EDITOR || editor == null) {
-            onComplete(false)
+            onComplete?.invoke(false)
             return
         }
-        // Rendering is not a reason to touch a file: never rewrite a note the user has not edited.
-        if (extra == null && !documentDirty) {
-            onComplete(true)
+        if (!saveCoordinator.hasUnsavedChanges && !saveCoordinator.hasInFlightSave) {
+            onComplete?.invoke(true)
             return
         }
-        if (savePending) {
-            if (extra != null) {
-                queuedExtra = listOfNotNull(queuedExtra, extra).joinToString("\n")
-            }
-            queuedCompletions.add(onComplete)
-            return
-        }
-        val note = currentNote ?: run {
-            onComplete(false)
-            return
-        }
-        savePending = true
-        documentDirty = false
+        onComplete?.let(saveWaiters::add)
         handler.removeCallbacks(autosave)
-        statusView?.text = "正在保存…"
+        startNextSave()
+    }
+
+    private fun startNextSave() {
+        val editor = webView ?: return
+        val note = currentNote ?: return
+        val request = saveCoordinator.beginSave() ?: run {
+            updateSaveStatus()
+            return
+        }
+        val generation = editorGeneration
+        updateSaveStatus()
         editor.evaluateJavascript("window.markbook && window.markbook.serialize ? window.markbook.serialize() : ''") { value ->
-            savePending = false
-            val base = decodeJavascriptString(value)
-            val content = if (extra == null) base else base.trimEnd() + "\n\n" + extra + "\n"
-            val success = repository.saveText(note, content)
-            if (success) {
-                currentNote = repository.refreshDocument(note) ?: note
-                statusView?.text = if (extra == null) "已保存" else "照片已插入并保存"
-            } else {
-                documentDirty = true
-                statusView?.text = "保存失败 · 请检查 Vault 权限"
+            if (generation != editorGeneration || screen != Screen.EDITOR || noteIoExecutor.isShutdown) {
+                return@evaluateJavascript
             }
-            if (success && extra != null) {
-                webView?.loadDataWithBaseURL(null, renderNote(content), "text/html", "UTF-8", null)
-            }
-            val nextExtra = queuedExtra
-            val pending = queuedCompletions.toList()
-            queuedExtra = null
-            queuedCompletions.clear()
-            if (success && nextExtra != null) {
-                saveCurrentNote(nextExtra) { queued ->
-                    onComplete(queued)
-                    pending.forEach { it(queued) }
+            val content = decodeJavascriptString(value)
+            noteIoExecutor.execute {
+                val success = repository.saveText(note, content)
+                val refreshed = if (success) repository.refreshDocument(note) else null
+                runOnUiThread {
+                    if (isFinishing || isDestroyed || generation != editorGeneration || screen != Screen.EDITOR) {
+                        return@runOnUiThread
+                    }
+                    saveCoordinator.complete(request, success)
+                    if (success && refreshed != null) currentNote = refreshed
+                    updateSaveStatus()
+                    if (!success) {
+                        val pending = saveWaiters.toList()
+                        saveWaiters.clear()
+                        pending.forEach { it(false) }
+                    } else if (saveCoordinator.hasUnsavedChanges) {
+                        startNextSave()
+                    } else {
+                        val pending = saveWaiters.toList()
+                        saveWaiters.clear()
+                        pending.forEach { it(true) }
+                    }
                 }
-            } else {
-                onComplete(success)
-                pending.forEach { it(success) }
             }
         }
+    }
+
+    private fun updateSaveStatus() {
+        val state = saveCoordinator.state
+        statusView?.text = when (state) {
+            RevisionSaveCoordinator.State.SAVED -> "已保存"
+            RevisionSaveCoordinator.State.DIRTY -> "未保存"
+            RevisionSaveCoordinator.State.SAVING -> "正在保存…"
+            RevisionSaveCoordinator.State.FAILED -> "保存失败 · 请检查 Vault 权限或存储空间后重试"
+        }
+        saveActionView?.isEnabled = !saveCoordinator.hasInFlightSave
+        saveActionView?.alpha = if (saveCoordinator.hasInFlightSave) 0.55f else 1f
     }
 
     private fun startCamera() {
@@ -1158,7 +1376,7 @@ class MainActivity : Activity() {
                 repository.rememberVault(it)
                 browserDirectory = null
                 browserPath.clear()
-                showVaultBrowser(true)
+                recoverVaultAndOpenBrowser()
             }
             return
         }
@@ -1271,7 +1489,7 @@ class MainActivity : Activity() {
             showPhotoSaveFailure("无法处理照片，请调整后重试")
             return
         }
-        Thread {
+        noteIoExecutor.execute {
             val attachments = try {
                 FileInputStream(capture).use { repository.savePhotoPair(note.name, it, corrected) }
             } catch (_: Exception) {
@@ -1282,7 +1500,7 @@ class MainActivity : Activity() {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     showPhotoSaveFailure("照片尚未插入，请检查 Vault 权限或存储空间后重试")
                 }
-                return@Thread
+                return@execute
             }
             val relativePath = repository.relativeAttachmentPath(note, attachments)
             val imageLink = "![${attachments.corrected}]($relativePath)"
@@ -1292,10 +1510,11 @@ class MainActivity : Activity() {
             )
             val success = repository.saveText(note, content)
             if (success) {
-                currentNote = repository.refreshDocument(note) ?: note
+                val refreshed = repository.refreshDocument(note) ?: note
                 repository.confirmPhotoPair(attachments)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
+                    currentNote = refreshed
                     pendingEditorScrollY = photoContextScrollY
                     pendingCaretImagePath = relativePath
                     photoContextContent = null
@@ -1306,7 +1525,7 @@ class MainActivity : Activity() {
                     photoInsertAction = null
                     photoModeActions = emptyList()
                     photoSavePending = false
-                    showEditor(currentNote ?: note)
+                    showEditor(refreshed, content)
                     statusView?.text = "照片已插入并保存"
                 }
             } else {
@@ -1316,7 +1535,7 @@ class MainActivity : Activity() {
                     showPhotoSaveFailure("无法更新笔记，照片尚未插入；可重试或返回笔记")
                 }
             }
-        }.start()
+        }
     }
 
     private fun restoreEditorScreen() {
@@ -1324,12 +1543,19 @@ class MainActivity : Activity() {
         discardCaptureFile()
         editorView = null
         pendingEditorScrollY = photoContextScrollY
+        val restoredContent = photoContextContent?.replace(MarkdownCodec.CARET_MARKER, "")
         photoContextContent = null
         photoStatusView = null
         photoInsertAction = null
         photoModeActions = emptyList()
         val note = currentNote
-        if (note == null) showVaultBrowser() else showEditor(note)
+        if (note == null) {
+            showVaultBrowser()
+        } else if (restoredContent != null) {
+            showEditor(note, restoredContent)
+        } else {
+            openNote(note)
+        }
     }
 
     private fun setPhotoMode(view: PhotoEditorView, mode: PhotoEditMode) {
@@ -1403,8 +1629,8 @@ class MainActivity : Activity() {
         fun onChanged() {
             handler.post {
                 if (screen != Screen.EDITOR) return@post
-                documentDirty = true
-                statusView?.text = "未保存"
+                saveCoordinator.markEdited()
+                updateSaveStatus()
                 handler.removeCallbacks(autosave)
                 handler.postDelayed(autosave, AUTOSAVE_DELAY_MS)
             }
@@ -1450,13 +1676,12 @@ class MainActivity : Activity() {
     }
 
     private fun editorContext(note: VaultDocument): String {
-        val vault = repository.vaultRoot()?.name ?: "Vault"
         val location = when {
             browserPath.isNotEmpty() -> browserPath.joinToString(" / ")
             repository.dailyNoteDirectoryPath().isNotBlank() -> repository.dailyNoteDirectoryPath()
             else -> "Vault 根目录"
         }
-        return "$vault · $location · ${note.name}"
+        return "$currentVaultName · $location · ${note.name}"
     }
 
     private fun vaultRow(
@@ -1709,7 +1934,7 @@ class MainActivity : Activity() {
         get() = Color.WHITE
 
     private enum class Screen {
-        WELCOME, BROWSER, EDITOR, PHOTO, SETTINGS, DAILY_FOLDER_PICKER,
+        WELCOME, BROWSER, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, SETTINGS, DAILY_FOLDER_PICKER,
         DRIVE_SETUP, DRIVE_FOLDER_PICKER, DRIVE_CONFIRM, DRIVE_PROGRESS, DRIVE_RESULT
     }
 

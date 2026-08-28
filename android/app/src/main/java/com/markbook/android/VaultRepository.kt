@@ -32,6 +32,27 @@ data class VaultSyncFile(
     val document: VaultDocument
 )
 
+enum class VaultFailureKind {
+    PERMISSION_DENIED,
+    READ_FAILED
+}
+
+sealed class NoteReadResult {
+    data class Success(val content: String) : NoteReadResult()
+    data class Failure(val kind: VaultFailureKind) : NoteReadResult()
+}
+
+sealed class DailyNoteResult {
+    data class Existing(val document: VaultDocument) : DailyNoteResult()
+    data class Created(val document: VaultDocument) : DailyNoteResult()
+    data class Failure(val kind: VaultFailureKind) : DailyNoteResult()
+}
+
+sealed class VaultRecoveryResult {
+    object Success : VaultRecoveryResult()
+    data class Failure(val kind: VaultFailureKind) : VaultRecoveryResult()
+}
+
 class VaultRepository(private val context: Context) {
     private val resolver: ContentResolver = context.contentResolver
     private val preferences = context.getSharedPreferences("markbook", Context.MODE_PRIVATE)
@@ -137,36 +158,65 @@ class VaultRepository(private val context: Context) {
         return (prefix + attachments.relativeDirectory + attachments.corrected).joinToString("/")
     }
 
-    fun dailyNote(): VaultDocument? {
+    fun openDailyNote(): DailyNoteResult {
         return try {
-            val tree = savedVaultUri() ?: return null
-            val dailyDirectory = findOrCreateDirectory(tree, dailyNoteDirectoryParts()) ?: return null
-            recoverDirectory(tree, dailyDirectory, false)
-            findChild(tree, rootDocument(tree), "attachments")?.let { legacyAttachments ->
-                recoverDirectory(tree, legacyAttachments.uri, true, "attachments")
-            }
-            findChild(tree, rootDocument(tree), "assets")?.let { assets ->
-                recoverDirectory(tree, assets.uri, true, "assets")
-            }
+            val tree = savedVaultUri()
+                ?: return DailyNoteResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+            val directory = findOrCreateDirectory(tree, dailyNoteDirectoryParts())
+                ?: return DailyNoteResult.Failure(VaultFailureKind.READ_FAILED)
             val name = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".md"
-            val existing = findChild(tree, dailyDirectory, name)
-            existing ?: DocumentsContract.createDocument(
+            val existing = findChild(tree, directory, name)
+            if (existing != null) return DailyNoteResult.Existing(existing)
+            val created = DocumentsContract.createDocument(
                 resolver,
-                dailyDirectory,
+                directory,
                 "text/markdown",
                 name
-            )?.let { VaultDocument(it, name, "text/markdown", dailyDirectory) }
+            ) ?: return DailyNoteResult.Failure(VaultFailureKind.READ_FAILED)
+            DailyNoteResult.Created(VaultDocument(created, name, "text/markdown", directory))
+        } catch (_: SecurityException) {
+            DailyNoteResult.Failure(VaultFailureKind.PERMISSION_DENIED)
         } catch (_: Exception) {
-            null
+            DailyNoteResult.Failure(VaultFailureKind.READ_FAILED)
         }
     }
 
-    fun readText(document: VaultDocument): String? = try {
-        resolver.openInputStream(document.uri)?.use {
-            String(it.readBytes(), StandardCharsets.UTF_8)
+    fun dailyNote(): VaultDocument? = when (val result = openDailyNote()) {
+        is DailyNoteResult.Created -> result.document
+        is DailyNoteResult.Existing -> result.document
+        is DailyNoteResult.Failure -> null
+    }
+
+    fun readNote(document: VaultDocument): NoteReadResult {
+        return try {
+            val content = resolver.openInputStream(document.uri)?.use {
+                String(it.readBytes(), StandardCharsets.UTF_8)
+            } ?: return NoteReadResult.Failure(VaultFailureKind.READ_FAILED)
+            NoteReadResult.Success(content)
+        } catch (_: SecurityException) {
+            NoteReadResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+        } catch (_: Exception) {
+            NoteReadResult.Failure(VaultFailureKind.READ_FAILED)
         }
-    } catch (_: Exception) {
-        null
+    }
+
+    fun readText(document: VaultDocument): String? = when (val result = readNote(document)) {
+        is NoteReadResult.Success -> result.content
+        is NoteReadResult.Failure -> null
+    }
+
+    /** Resolves interrupted Markbook transactions throughout the user-editable Vault. */
+    fun recoverVault(): VaultRecoveryResult {
+        return try {
+            val tree = savedVaultUri()
+                ?: return VaultRecoveryResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+            recoverVaultDirectory(tree, rootDocument(tree), "")
+            VaultRecoveryResult.Success
+        } catch (_: SecurityException) {
+            VaultRecoveryResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+        } catch (_: Exception) {
+            VaultRecoveryResult.Failure(VaultFailureKind.READ_FAILED)
+        }
     }
 
     /**
@@ -339,8 +389,8 @@ class VaultRepository(private val context: Context) {
     }
 
     /**
-     * Returns the user-owned files that may be synchronized. App configuration and interrupted
-     * write artifacts never leave the device; the optional Vault trash remains user content.
+     * Returns the user-owned files that may be synchronized. App configuration, interrupted write
+     * artifacts, and the Vault-local trash never leave the device.
      */
     fun syncFiles(): List<VaultSyncFile> {
         val tree = savedVaultUri() ?: return emptyList()
@@ -379,7 +429,7 @@ class VaultRepository(private val context: Context) {
                 backup = DocumentsContract.renameDocument(
                     resolver,
                     existing.uri,
-                    ".markbook-${UUID.randomUUID()}.bak"
+                    ".markbook-$name.bak"
                 )
                 if (backup == null) throw IllegalStateException("Unable to protect existing file")
             }
@@ -510,7 +560,13 @@ class VaultRepository(private val context: Context) {
         return "$stem-${UUID.randomUUID()}${if (extension.isBlank()) "" else ".$extension"}"
     }
 
-    private fun listChildren(tree: Uri, parent: Uri): List<VaultDocument> {
+    private fun listChildren(tree: Uri, parent: Uri): List<VaultDocument> = try {
+        listChildrenStrict(tree, parent)
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun listChildrenStrict(tree: Uri, parent: Uri): List<VaultDocument> {
         val parentId = DocumentsContract.getDocumentId(parent)
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
         val projection = arrayOf(
@@ -518,90 +574,102 @@ class VaultRepository(private val context: Context) {
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,
             DocumentsContract.Document.COLUMN_MIME_TYPE
         )
-        return try {
-            resolver.query(children, projection, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                buildList {
-                    while (cursor.moveToNext()) {
-                        val name = cursor.getString(nameIndex) ?: continue
-                        val id = cursor.getString(idIndex) ?: continue
-                        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
-                        add(VaultDocument(uri, name, cursor.getString(mimeIndex), parent))
-                    }
+        return resolver.query(children, projection, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            buildList {
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameIndex) ?: continue
+                    val id = cursor.getString(idIndex) ?: continue
+                    val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                    add(VaultDocument(uri, name, cursor.getString(mimeIndex), parent))
                 }
-            } ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
-        }
+            }
+        } ?: throw IllegalStateException("Unable to enumerate Vault directory")
     }
 
-    private fun recoverDirectory(
-        tree: Uri,
-        directory: Uri,
-        attachments: Boolean,
-        attachmentRelativeDirectory: String = ""
-    ) {
-        listChildren(tree, directory).forEach { document ->
+    private fun recoverVaultDirectory(tree: Uri, directory: Uri, relativeDirectory: String) {
+        listChildrenStrict(tree, directory).forEach { document ->
+            val relativePath = listOf(relativeDirectory, document.name)
+                .filter { it.isNotEmpty() }
+                .joinToString("/")
             when {
-                attachments && document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR -> {
-                    val childDirectory = listOf(attachmentRelativeDirectory, document.name)
-                        .filter { it.isNotEmpty() }
-                        .joinToString("/")
-                    recoverDirectory(tree, document.uri, true, childDirectory)
-                }
-                document.name.endsWith(".tmp") -> {
-                    try { DocumentsContract.deleteDocument(resolver, document.uri) } catch (_: Exception) { }
-                }
-                document.name.endsWith(".bak") && !attachments -> {
-                    val original = document.name.removePrefix(".markbook-").removeSuffix(".bak")
-                    val existing = findChild(tree, directory, original)
-                    try {
-                        if (existing == null) DocumentsContract.renameDocument(resolver, document.uri, original)
-                        else DocumentsContract.deleteDocument(resolver, document.uri)
-                    } catch (_: Exception) { }
-                }
-                document.name.endsWith(".txn") && attachments -> {
-                    val names = readText(document)?.lines()?.filter { it.isNotBlank() }.orEmpty()
-                    val committed = names.any {
-                        attachmentReferencedByNotes(tree, "$attachmentRelativeDirectory/$it")
+                document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR -> {
+                    if (relativePath !in RECOVERY_EXCLUDED_DIRECTORIES) {
+                        recoverVaultDirectory(tree, document.uri, relativePath)
                     }
-                    try {
-                        if (committed) {
-                            DocumentsContract.deleteDocument(resolver, document.uri)
-                        } else {
-                            names.forEach { name ->
-                                findChild(tree, directory, name)?.let {
-                                    DocumentsContract.deleteDocument(resolver, it.uri)
-                                }
-                            }
-                            DocumentsContract.deleteDocument(resolver, document.uri)
-                        }
-                    } catch (_: Exception) { }
                 }
+                else -> recoverArtifact(
+                    tree,
+                    directory,
+                    document,
+                    VaultRecoveryPolicy.classify(document.name, isAttachmentDirectory(relativeDirectory))
+                )
             }
         }
     }
 
-    private fun attachmentReferencedByNotes(tree: Uri, attachmentPath: String): Boolean {
-        val parts = dailyNoteDirectoryParts()
-        val notesDirectory = if (parts.isEmpty()) {
-            VaultDocument(rootDocument(tree), "Vault", DocumentsContract.Document.MIME_TYPE_DIR)
-        } else {
-            findByRelativePath(tree, parts.joinToString("/")) ?: return false
+    private fun recoverArtifact(
+        tree: Uri,
+        directory: Uri,
+        document: VaultDocument,
+        artifact: RecoveryArtifact
+    ) {
+        when (artifact) {
+            RecoveryArtifact.Ignore -> Unit
+            RecoveryArtifact.DeleteTemporary -> {
+                try { DocumentsContract.deleteDocument(resolver, document.uri) } catch (_: Exception) { }
+            }
+            is RecoveryArtifact.RestoreBackup -> {
+                val existing = findChild(tree, directory, artifact.originalName)
+                try {
+                    if (existing == null) {
+                        DocumentsContract.renameDocument(resolver, document.uri, artifact.originalName)
+                    } else {
+                        DocumentsContract.deleteDocument(resolver, document.uri)
+                    }
+                } catch (_: Exception) { }
+            }
+            RecoveryArtifact.ResolvePhotoTransaction -> {
+                val names = readText(document)?.lines()?.filter { it.isNotBlank() }.orEmpty()
+                val committed = names.isNotEmpty() && attachmentReferencedByAnyNote(tree, names)
+                try {
+                    if (!committed) {
+                        names.forEach { name ->
+                            findChild(tree, directory, name)?.let {
+                                DocumentsContract.deleteDocument(resolver, it.uri)
+                            }
+                        }
+                    }
+                    DocumentsContract.deleteDocument(resolver, document.uri)
+                } catch (_: Exception) { }
+            }
         }
-        val marker = (List(parts.size) { ".." } + attachmentPath).joinToString("/")
-        return directoryReferences(tree, notesDirectory.uri, marker)
     }
 
-    private fun directoryReferences(tree: Uri, directory: Uri, marker: String): Boolean {
-        for (document in listChildren(tree, directory)) {
+    private fun isAttachmentDirectory(relativeDirectory: String): Boolean =
+        relativeDirectory.substringBefore('/') in setOf("assets", "attachments")
+
+    private fun attachmentReferencedByAnyNote(tree: Uri, names: List<String>): Boolean =
+        directoryReferencesAny(tree, rootDocument(tree), "", names)
+
+    private fun directoryReferencesAny(
+        tree: Uri,
+        directory: Uri,
+        relativeDirectory: String,
+        names: List<String>
+    ): Boolean {
+        for (document in listChildrenStrict(tree, directory)) {
             if (document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
-                if (directoryReferences(tree, document.uri, marker)) return true
-            } else if (document.name.endsWith(".md", ignoreCase = true) &&
-                readText(document)?.contains(marker) == true) {
-                return true
+                val childPath = listOf(relativeDirectory, document.name)
+                    .filter { it.isNotEmpty() }
+                    .joinToString("/")
+                if (childPath.substringBefore('/') !in NOTE_SCAN_EXCLUDED_DIRECTORIES &&
+                    directoryReferencesAny(tree, document.uri, childPath, names)) return true
+            } else if (document.name.endsWith(".md", ignoreCase = true)) {
+                val content = readText(document).orEmpty()
+                if (names.any(content::contains)) return true
             }
         }
         return false
@@ -635,6 +703,10 @@ class VaultRepository(private val context: Context) {
         private const val PHOTO_RANDOM_LENGTH = 4
         private const val PHOTO_RANDOM_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
         private const val DEFAULT_SYNC_BUFFER_BYTES = 32 * 1024
+        private val RECOVERY_EXCLUDED_DIRECTORIES = setOf(".obsidian", ".trash")
+        private val NOTE_SCAN_EXCLUDED_DIRECTORIES = setOf(
+            ".obsidian", ".trash", ".markbook", "assets", "attachments"
+        )
         private val photoRandom = SecureRandom()
     }
 }

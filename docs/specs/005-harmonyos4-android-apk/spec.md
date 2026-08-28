@@ -4,7 +4,7 @@
 **Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
 004-harmony-4-5-compatibility
-**Current Baseline**: Android APK `0.1.0` (`versionCode 1`)
+**Current Baseline**: Android APK `0.1.1` development (`versionCode 2`)
 
 ## Goal
 
