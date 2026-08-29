@@ -1,5 +1,34 @@
 # Repository Guidelines
 
+## Daily Vibe Coding & Model Routing
+
+Use **Terra with xhigh reasoning effort** by default. Terra Main owns each task
+end to end: establish context, make the smallest safe change, validate it, and
+report the result. Do not delegate routine work merely to parallelize it.
+
+Route work by risk and reasoning depth:
+
+- **Routine request → Terra Main:** localized UI or content changes,
+  straightforward implementation, focused tests, documentation, and small
+  refactors with clear acceptance criteria.
+- **Complex architecture → Sol:** cross-module/client design, Vault-contract
+  implications, migrations, compatibility, security, or multiple plausible
+  approaches. Provide files, constraints, alternatives, and the decision needed.
+- **Hard bug → Sol:** an unresolved reproducible, concurrency, lifecycle,
+  persistence, flaky, or cross-platform failure. Include repro, expected vs.
+  observed behavior, attempted fixes, logs, and relevant code.
+- **Completed feature → Sol review:** review correctness, regression risk,
+  contract compliance, test coverage, and user-visible behavior; resolve or
+  explicitly defer findings.
+- **Mechanical work → Luna:** repetitive, low-risk, specified work such as
+  discovery, formatting, boilerplate, test data, renames, and inventories. Give
+  exact scope and acceptance checks; Terra verifies the result.
+
+Escalation does not transfer accountability: Terra integrates and validates the
+outcome. Do not delegate secret handling, destructive operations, or ambiguous
+scope decisions without explicit user authorization. Sol review supplements the
+required design documentation and checklist for user-visible changes.
+
 ## Project Structure & Module Organization
 
 Markbook has two mobile clients sharing one Vault contract. The priority client
@@ -18,33 +47,22 @@ Both clients must preserve identical Vault paths and relative Markdown links.
 `docs/contracts/vault-contract.md` is the sole persisted-data contract for file
 layout, attachment paths, recovery, trash, and conflicts.
 
-All project documentation lives under `docs/`: `constitution.md` and `product/`
-hold the governing rules and roadmap, `contracts/` holds cross-client data
-contracts, `design/` holds the active experience baseline, and `specs/` holds
-numbered work. Specs `001`–`003` are platform-neutral capability domains, `004`
-tracks cross-client interoperability, `005`–`006` track Android and HAP platform
-delivery, `007` is the completed design-knowledge-base setup record, and `008`
-tracks Android implementation hardening. Update the affected `spec.md`,
-`plan.md`, and `tasks.md` before changing scope.
-
-Keep task ownership singular. Capability specs do not track platform UI, build,
-or API completion. Android implementation tasks belong in `005`, HAP tasks in
-`006`, shared fixtures and migration checks in `004`, and traceable Android
-defects in `008`. A capability may require both clients to pass final acceptance
-without copying their implementation tasks into multiple specs.
+Documentation lives under `docs/`: `constitution.md` and `product/` govern,
+`contracts/` defines cross-client data, `design/` is the experience baseline, and
+`specs/` tracks work. Update affected `spec.md`, `plan.md`, and `tasks.md` before
+changing scope. Keep ownership singular: use `004` for shared fixtures and
+migration checks, `005` for Android delivery, `006` for HAP delivery, and `008`
+for traceable Android defects; do not duplicate platform implementation work in
+capability specs.
 
 ## Design Knowledge Base
 
-Before implementing or reviewing any user-visible behavior, start with
-`docs/design/README.md` and read the relevant design file. `design_principles.md`
-and `components.md` apply to all
-screens; `note_editor.md` applies to Markdown editing; `capture_flow.md` applies
-to camera, image processing, attachment storage, and insertion. Use
-`review_checklist.md` before handing off a UI or interaction change. When a
-change alters a documented flow or component behavior, update the design
-document first, then the affected numbered `spec.md`, `plan.md`, and `tasks.md`.
-`docs/contracts/vault-contract.md` remains authoritative for persisted data
-behavior.
+Before implementing or reviewing user-visible behavior, read
+`docs/design/README.md` and the relevant design file: `design_principles.md` and
+`components.md` apply to all screens; `note_editor.md` covers Markdown editing;
+`capture_flow.md` covers camera and attachments. Use `review_checklist.md`
+before handing off UI or interaction changes. Update a changed design document
+before its affected numbered `spec.md`, `plan.md`, and `tasks.md`.
 
 ## Version and Release Management
 
@@ -60,24 +78,21 @@ Prioritize the Android APK defined by spec `005`; use the existing Gradle Wrappe
 under `android/` with Java 11 or newer. Use DevEco Studio with a matching
 installed SDK for the HarmonyOS 5/6 HAP.
 
-- `ohpm install` installs project dependencies.
-- `./scripts/build-hap.sh` builds the entry HAP with the DevEco-provided Node,
-  Hvigor, and SDK paths.
+- `ohpm install`; `./scripts/build-hap.sh` builds the entry HAP with
+  DevEco-provided Node, Hvigor, and SDK paths.
 - Build and run the Hypium test HAP from DevEco Studio on a configured device;
-  do not claim device coverage from compilation alone.
+  compilation alone is not device coverage.
 - `./gradlew :app:testDebugUnitTest :app:assembleDebug` from `android/` runs the
   Android unit tests and builds the debug APK.
 - `./scripts/install-apk.sh` installs the generated APK using an available
   `adb` or `hdc` connection after the device authorizes the debugging key.
 
-DevEco Studio supplies the Node and Hvigor runtimes used by `build-hap.sh`. Do
-not commit `.hvigor/`, `oh_modules/`, signed HAPs, or local SDK paths.
-For CLI builds, `DEVECO_SDK_HOME` must point to an SDK root containing a
-version directory such as `HarmonyOS-6.0.1`; `.../sdk/default` alone is not
-the expected root. Use `--no-daemon` if the local Hvigor cache has a stale lock.
-Use `docs/specs/005-harmonyos4-android-apk/quickstart.md` for Android build and
-Mate 60 acceptance, and `docs/specs/006-harmonyos5-6-native-hap/quickstart.md`
-for HAP acceptance.
+DevEco Studio supplies Node and Hvigor. Do not commit `.hvigor/`, `oh_modules/`,
+signed HAPs, or local SDK paths. For CLI builds, `DEVECO_SDK_HOME` must be an
+SDK root containing a version directory (for example `HarmonyOS-6.0.1`), not
+only `.../sdk/default`; use `--no-daemon` for a stale Hvigor lock. Follow
+`docs/specs/005-harmonyos4-android-apk/quickstart.md` for Android and Mate 60
+acceptance, and `docs/specs/006-harmonyos5-6-native-hap/quickstart.md` for HAP.
 
 ## Coding Style & Naming Conventions
 
@@ -96,11 +111,10 @@ restart, and confirm the image and relative Markdown link remain valid.
 
 ## Commit & Pull Request Guidelines
 
-History uses short English subjects such as `Logic implement` and
-`Init the spec-kit structure along with doc folder`. Prefer a clear imperative
-subject such as `Add local attachment storage`, and keep commits focused. Pull
-requests must describe user-visible behavior, list build/test results, link the
-relevant issue, and include Mate phone screenshots for UI changes.
+Use short, imperative English commit subjects (for example, `Add local
+attachment storage`) and focused commits. Pull requests must describe
+user-visible behavior, list build/test results, link the relevant issue, and
+include Mate phone screenshots for UI changes.
 
 ## Security & Configuration
 
