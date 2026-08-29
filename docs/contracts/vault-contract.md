@@ -38,6 +38,9 @@ incomplete attachment transaction may be removed after its marker is examined.
 Deletes move notes into `.trash/`; this directory is excluded from remote sync.
 Permanent deletion is a separate explicit operation. Attachments are retained until a later
 explicit cleanup flow, because they may still be referenced by another note.
+“Clear trash” permanently deletes only the current contents directly below the Vault-root
+`.trash/` after explicit user confirmation. It does not delete `assets/` or `attachments/`, and a
+partial failure leaves every undeleted item in place for a later retry.
 When both sides changed the same path, keep both versions under
 `.markbook/conflicts/` or with a deterministic `冲突-<device>-<timestamp>` suffix.
 No client silently overwrites the other version.

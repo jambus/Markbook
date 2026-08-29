@@ -3,7 +3,7 @@
 ## Technical Context
 
 - Kotlin Android 工程位于 `android/`，使用项目内 Gradle Wrapper。
-- 当前开发版本为 `versionName 0.1.1`、`versionCode 2`；后续候选版本按
+- 当前开发版本为 `versionName 0.2.0`、`versionCode 3`；后续候选版本按
   [`docs/RELEASE_NOTES.md`](../../RELEASE_NOTES.md) 的规则提升并记录。
 - 通过 Storage Access Framework 选择 Vault 并持久化目录 URI 权限。
 - 通过 Activity Result API 拉起系统相机并复制返回内容。
@@ -23,6 +23,8 @@
 9. 在设置页显示版本、构建号和当前语言能力；中文为首发语言，完整中英文国际化作为后续独立交付。
 10. 将当前已实现功能归档为 Android APK `0.1.0` 开发基线，并在每次候选构建前同步
     release notes、平台规格、`versionName` 与单调递增的 `versionCode`。
+11. 在设置页新增“存储”分组，后台统计 `.trash/` 直接内容；空回收站禁用操作，非空时
+    二次确认后逐项永久删除，附件保留，结果持续显示并允许失败项重试。
 
 ## Constitution Check
 

@@ -53,6 +53,17 @@ sealed class VaultRecoveryResult {
     data class Failure(val kind: VaultFailureKind) : VaultRecoveryResult()
 }
 
+sealed class TrashContentsResult {
+    data class Success(val count: Int) : TrashContentsResult()
+    data class Failure(val kind: VaultFailureKind) : TrashContentsResult()
+}
+
+data class TrashClearResult(
+    val deleted: Int,
+    val failed: Int,
+    val remaining: Int
+)
+
 class VaultRepository(private val context: Context) {
     private val resolver: ContentResolver = context.contentResolver
     private val preferences = context.getSharedPreferences("markbook", Context.MODE_PRIVATE)
@@ -308,6 +319,47 @@ class VaultRepository(private val context: Context) {
         }
     }
 
+    fun trashContents(): TrashContentsResult {
+        return try {
+            val tree = savedVaultUri()
+                ?: return TrashContentsResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+            val trash = findChildStrict(tree, rootDocument(tree), ".trash")
+                ?: return TrashContentsResult.Success(0)
+            TrashContentsResult.Success(listChildrenStrict(tree, trash.uri).size)
+        } catch (_: SecurityException) {
+            TrashContentsResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+        } catch (_: Exception) {
+            TrashContentsResult.Failure(VaultFailureKind.READ_FAILED)
+        }
+    }
+
+    /** Permanently deletes only the direct children of the Vault-root .trash directory. */
+    fun emptyTrash(): TrashClearResult {
+        val tree = savedVaultUri() ?: return TrashClearResult(0, 1, 0)
+        return try {
+            val trash = findChildStrict(tree, rootDocument(tree), ".trash")
+                ?: return TrashClearResult(0, 0, 0)
+            val children = listChildrenStrict(tree, trash.uri)
+            val counter = TrashClearCounter()
+            children.forEach { document ->
+                val success = try {
+                    DocumentsContract.deleteDocument(resolver, document.uri)
+                } catch (_: Exception) {
+                    false
+                }
+                counter.record(success)
+            }
+            val remaining = try {
+                listChildrenStrict(tree, trash.uri).size
+            } catch (_: Exception) {
+                children.size
+            }
+            counter.result(remaining)
+        } catch (_: Exception) {
+            TrashClearResult(0, 1, 0)
+        }
+    }
+
     fun savePhotoPair(
         noteName: String,
         original: InputStream,
@@ -546,6 +598,9 @@ class VaultRepository(private val context: Context) {
     private fun findChild(tree: Uri, parent: Uri, name: String): VaultDocument? {
         return listChildren(tree, parent).firstOrNull { it.name == name }
     }
+
+    private fun findChildStrict(tree: Uri, parent: Uri, name: String): VaultDocument? =
+        listChildrenStrict(tree, parent).firstOrNull { it.name == name }
 
     private fun uniqueTrashName(tree: Uri, trash: Uri, name: String): String {
         if (findChild(tree, trash, name) == null) return name

@@ -4,7 +4,7 @@
 **Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
 004-harmony-4-5-compatibility
-**Current Baseline**: Android APK `0.1.1` development (`versionCode 2`)
+**Current Baseline**: Android APK `0.2.0` development (`versionCode 3`)
 
 ## Goal
 
@@ -74,6 +74,8 @@ Mate 60 真机验收前，该版本不得标记为正式发布。
 - **FR-515** 文件库必须区分空目录和无法访问目录，并提供重新选择 Vault 或返回上级的恢复入口。
 - **FR-516** 设置页必须显示版本号与构建号，并列出中文（已启用）和 English（即将支持、
   不可操作）；应用当前不提供英文翻译或语言切换。
+- **FR-517** Android 设置页必须实现 `001` 的清空回收站行为：后台统计并仅永久删除
+  Vault 根目录 `.trash/` 的直接内容，执行前明确确认不可撤销和附件保留，部分失败可重试。
 
 ## Out of Scope
 

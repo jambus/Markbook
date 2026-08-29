@@ -63,6 +63,13 @@ class MainActivity : Activity() {
     private val dailyFolderPath = mutableListOf<String>()
     private val dailyFolderHistory = mutableListOf<VaultDocument>()
     private var dailyFolderLoadGeneration = 0L
+    private var trashCount: Int? = null
+    private var trashLoadFailed = false
+    private var trashClearPending = false
+    private var trashStatusMessage: String? = null
+    private var trashStatusView: TextView? = null
+    private var trashRowView: View? = null
+    private var trashLoadGeneration = 0L
     private var captureFile: File? = null
     private var captureUri: Uri? = null
     private var editorView: PhotoEditorView? = null
@@ -363,6 +370,11 @@ class MainActivity : Activity() {
     private fun showSettings() {
         releaseEditor()
         screen = Screen.SETTINGS
+        trashCount = null
+        trashLoadFailed = false
+        trashStatusMessage = null
+        trashStatusView = null
+        trashRowView = null
         val root = pageRoot(COLOR_BACKGROUND)
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -403,6 +415,8 @@ class MainActivity : Activity() {
             setTextColor(COLOR_MUTED_TEXT)
             setPadding(dp(6), dp(12), dp(6), 0)
         }, matchWrap())
+        sectionLabel(content, "存储")
+        content.addView(trashSettingsRow(), matchWrap())
         sectionLabel(content, "显示")
         val appearance = repository.appearanceMode()
         content.addView(settingsRow("日间模式", "浅色背景与深色文字", appearance == VaultRepository.APPEARANCE_DAY) {
@@ -429,6 +443,128 @@ class MainActivity : Activity() {
         scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+        if (!trashClearPending) loadTrashStatus()
+    }
+
+    private fun trashSettingsRow(): View = LinearLayout(this).apply {
+        trashRowView = this
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(68)
+        setPadding(dp(16), dp(10), dp(12), dp(10))
+        background = rounded(COLOR_ROW, dp(14))
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            when {
+                trashClearPending -> Unit
+                trashLoadFailed -> loadTrashStatus()
+                (trashCount ?: 0) > 0 -> confirmEmptyTrash()
+            }
+        }
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = "清空回收站"
+                textSize = 16f
+                setTextColor(COLOR_PRIMARY_TEXT)
+            }, matchWrap())
+            trashStatusView = TextView(this@MainActivity).apply {
+                textSize = 13f
+                maxLines = 2
+                setTextColor(COLOR_MUTED_TEXT)
+                setPadding(0, dp(3), 0, 0)
+            }
+            addView(trashStatusView, matchWrap())
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(TextView(this@MainActivity).apply {
+            text = "›"
+            textSize = 26f
+            gravity = Gravity.CENTER
+            setTextColor(COLOR_MUTED_TEXT)
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        updateTrashRow()
+    }
+
+    private fun loadTrashStatus() {
+        if (trashClearPending) return
+        val generation = ++trashLoadGeneration
+        trashCount = null
+        trashLoadFailed = false
+        updateTrashRow()
+        noteIoExecutor.execute {
+            val result = repository.trashContents()
+            runOnUiThread {
+                if (isFinishing || isDestroyed || generation != trashLoadGeneration) return@runOnUiThread
+                when (result) {
+                    is TrashContentsResult.Success -> {
+                        trashCount = result.count
+                        trashLoadFailed = false
+                    }
+                    is TrashContentsResult.Failure -> {
+                        trashCount = null
+                        trashLoadFailed = true
+                    }
+                }
+                if (screen == Screen.SETTINGS) updateTrashRow()
+            }
+        }
+    }
+
+    private fun updateTrashRow() {
+        val status = when {
+            trashClearPending -> "正在永久删除回收站内容…"
+            trashStatusMessage != null -> trashStatusMessage.orEmpty()
+            trashLoadFailed -> "无法读取回收站 · 点按重试"
+            trashCount == null -> "正在统计回收站…"
+            trashCount == 0 -> "回收站为空"
+            else -> "${trashCount} 个项目 · 图片附件不会删除"
+        }
+        trashStatusView?.text = status
+        val enabled = !trashClearPending && (trashLoadFailed || (trashCount ?: 0) > 0)
+        trashRowView?.isEnabled = enabled
+        trashRowView?.alpha = if (enabled) 1f else 0.62f
+        trashRowView?.contentDescription = "清空回收站，$status"
+    }
+
+    private fun confirmEmptyTrash() {
+        val count = trashCount ?: return
+        if (count <= 0 || trashClearPending) return
+        AlertDialog.Builder(this)
+            .setTitle("永久清空回收站？")
+            .setMessage(
+                "将永久删除当前 Vault/.trash 中的 $count 个项目。此操作无法撤销。" +
+                    "图片附件不会被删除。"
+            )
+            .setNegativeButton("取消", null)
+            .setPositiveButton("永久删除") { _, _ -> emptyTrash() }
+            .show()
+    }
+
+    private fun emptyTrash() {
+        if (trashClearPending) return
+        trashClearPending = true
+        trashStatusMessage = null
+        updateTrashRow()
+        noteIoExecutor.execute {
+            val result = repository.emptyTrash()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                trashClearPending = false
+                trashCount = if (result.failed > 0) {
+                    result.remaining.coerceAtLeast(result.failed)
+                } else {
+                    result.remaining
+                }
+                trashLoadFailed = false
+                trashStatusMessage = when {
+                    result.failed == 0 -> "已永久删除 ${result.deleted} 个项目"
+                    result.deleted > 0 -> "已删除 ${result.deleted} 个，${result.failed} 个失败 · 点按重试"
+                    else -> "删除失败，${result.remaining.coerceAtLeast(result.failed)} 个项目仍保留 · 点按重试"
+                }
+                if (screen == Screen.SETTINGS) updateTrashRow()
+            }
+        }
     }
 
     private fun setAppearance(mode: String) {
