@@ -15,6 +15,27 @@ Android APK 与 HarmonyOS HAP 分别维护安装包版本；两端共享 Vault �
   构建记录后，才能标记为“已发布”。
 - 尚未完成的优化不写入“已实现功能”，统一关联到对应编号规格的未完成任务。
 
+## 0.3.0 — 文件库管理
+
+**状态**：开发实现完成，待 Mate 60 验收（非候选）
+**安装包版本**：`versionName = 0.3.0`，`versionCode = 4`
+
+### 迭代目标
+
+- 在当前普通目录新建 Markdown 笔记或文件夹，并支持普通条目的重命名。
+- 将笔记或非空文件夹整体移到 Vault 根 `.trash/`；Provider 不支持时保持源目录不变。
+- 以 NFC、大小写无关且共享文件/文件夹名称空间的规则防止冲突与覆盖。
+- 修复任意深度普通笔记的附件相对路径，并在每日目录失效时安全重置配置。
+
+### 当前验证
+
+- Android 本地单元测试共 51 项通过，`0 failure / 0 error / 0 skip`。
+- 共享 Vault 契约检查通过，`assembleDebug` 构建成功。
+- APK：`android/app/build/outputs/apk/debug/app-debug.apk`；版本为
+  `versionName = 0.3.0`、`versionCode = 4`。
+- 真实 SAF Provider 与 Mate 60 真机尚未执行新建、重命名、目录移动失败、深层附件和
+  每日目录重置验收，因此 0.3.0 仍不是候选版本。
+
 ## 0.2.0 — 回收站管理
 
 **状态**：开发中

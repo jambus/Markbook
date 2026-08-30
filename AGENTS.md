@@ -72,6 +72,94 @@ platform spec and acceptance record, Android `versionName`, and monotonically
 increasing `versionCode`. Do not mark a development baseline as released before
 its required Mate real-device checks are recorded.
 
+## Multi-Agent Development Workflow
+
+Use sub-agents for non-trivial implementation work. The primary agent acts as
+the coordinator, controls handoffs between roles, and owns the final result.
+
+### Architecture and Review Agent
+
+- Model: `gpt-5.6-sol`.
+- Reasoning effort: `high` unless the task clearly requires a different level.
+- Inspect the relevant design documents, Vault contract, specs, tests, and
+  existing implementation before proposing changes.
+- Define architectural boundaries, compatibility risks, acceptance criteria,
+  implementation constraints, and required tests.
+- Review completed changes for correctness, regressions, data safety,
+  concurrency issues, and consistency with the shared Vault contract.
+- Remain read-only unless the user explicitly asks this role to edit files.
+- Cite concrete files and code locations in architecture and review findings.
+- Reuse the same Sol agent for the final review when possible so that the
+  original architectural context is preserved.
+
+### Development Agent
+
+- Model: `gpt-5.6-terra`.
+- Reasoning effort: `high` unless the task clearly requires a different level.
+- Implement the approved in-scope changes and own production-file edits during
+  the implementation phase.
+- Update required design, contract, spec, plan, task, acceptance, and release
+  documentation in the order defined by this repository guide.
+- Add or update automated tests together with the implementation.
+- Report changed files, implementation decisions, and known limitations before
+  handing the work to the test and review roles.
+
+### Test Agent
+
+- Model: `gpt-5.6-terra`.
+- Reasoning effort: `high` unless the task clearly requires a different level.
+- Act independently from the development agent and inspect the actual diff
+  before selecting validation coverage.
+- Run the relevant Android, HAP, and shared-contract checks and add focused
+  regression tests when the assigned scope permits test-file edits.
+- Verify acceptance criteria, failure paths, persistence behavior, and version
+  metadata; distinguish compilation, automated tests, emulator checks, and real
+  device evidence.
+- Do not modify production code. Return reproducible failures to the development
+  agent and retest after fixes.
+- Report exact commands, results, warnings, skipped checks, and remaining device
+  validation.
+
+### Required Role Workflow
+
+For feature implementation, persistence or concurrency changes, cross-client
+contract changes, or changes spanning multiple production files, the primary
+agent MUST use the following workflow:
+
+1. Spawn a `gpt-5.6-sol` architecture and review agent for read-only analysis.
+2. Evaluate its proposal and define the accepted implementation scope.
+3. Spawn a `gpt-5.6-terra` development agent to implement that scope and add
+   implementation-level tests.
+4. Spawn a separate `gpt-5.6-terra` test agent to inspect and validate the
+   resulting change independently.
+5. Send the implementation and test evidence to the original Sol agent for code
+   review.
+6. Send actionable test or review findings to the development agent for fixes.
+7. Ask the test agent to rerun affected checks after fixes, then have the primary
+   agent inspect the final diff and evidence before reporting completion.
+
+The primary agent may skip this workflow for simple questions, read-only status
+checks, typo fixes, and isolated documentation-only edits. It should state why
+the workflow is skipped when the user could reasonably expect implementation
+work.
+
+### Multi-Agent Coordination Rules
+
+- Do not let multiple agents edit the same files concurrently.
+- Architecture and review may run alongside independent read-only research, but
+  editing phases must have explicit file ownership.
+- All agents share the same workspace. Inspect the working tree before editing
+  and preserve existing user changes.
+- Keep task scope and ownership singular. Do not duplicate task records merely
+  because multiple agents participated.
+- Do not stage, commit, push, install builds, or perform destructive actions
+  unless the user requested them.
+- A review is not complete until every finding is fixed, rejected with concrete
+  evidence, or recorded as an accepted risk.
+- The primary agent remains responsible for final validation and must inspect
+  commands, outputs, diffs, and unresolved warnings rather than treating an
+  agent summary as proof.
+
 ## Build, Test, and Development Commands
 
 Prioritize the Android APK defined by spec `005`; use the existing Gradle Wrapper

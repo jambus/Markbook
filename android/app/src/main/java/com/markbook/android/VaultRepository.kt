@@ -17,8 +17,12 @@ data class VaultDocument(
     val uri: Uri,
     val name: String,
     val mimeType: String?,
-    val parentUri: Uri? = null
-)
+    val parentUri: Uri? = null,
+    val relativePath: String = ""
+) {
+    val parentRelativePath: String
+        get() = relativePath.substringBeforeLast('/', "")
+}
 
 data class PhotoAttachments(
     val original: String,
@@ -64,6 +68,30 @@ data class TrashClearResult(
     val remaining: Int
 )
 
+enum class VaultMutationFailureKind {
+    PERMISSION_DENIED,
+    READ_FAILED,
+    INVALID_NAME,
+    NAME_CONFLICT,
+    CREATE_FAILED,
+    RENAME_FAILED,
+    TRASH_NAME_CONFLICT,
+    MOVE_UNSUPPORTED
+}
+
+enum class DailyDirectoryChange { UNCHANGED, REWRITTEN, RESET_TO_ROOT }
+
+sealed class VaultMutationResult {
+    data class Success(
+        val document: VaultDocument?,
+        val requestedName: String,
+        val actualName: String?,
+        val dailyDirectoryChange: DailyDirectoryChange = DailyDirectoryChange.UNCHANGED
+    ) : VaultMutationResult()
+
+    data class Failure(val kind: VaultMutationFailureKind, val message: String? = null) : VaultMutationResult()
+}
+
 class VaultRepository(private val context: Context) {
     private val resolver: ContentResolver = context.contentResolver
     private val preferences = context.getSharedPreferences("markbook", Context.MODE_PRIVATE)
@@ -105,8 +133,13 @@ class VaultRepository(private val context: Context) {
     fun setDailyNoteDirectory(parts: List<String>) {
         val cleanParts = parts.map { it.trim() }
             .filter { it.isNotEmpty() && it != "." && it != ".." }
-        preferences.edit().putString(DAILY_NOTE_DIRECTORY_KEY, cleanParts.joinToString("/")).apply()
+        preferences.edit()
+            .putString(DAILY_NOTE_DIRECTORY_KEY, cleanParts.joinToString("/"))
+            .remove(DAILY_DIRECTORY_RESET_NOTICE_KEY)
+            .apply()
     }
+
+    fun dailyDirectoryResetNotice(): Boolean = preferences.getBoolean(DAILY_DIRECTORY_RESET_NOTICE_KEY, false)
 
     fun vaultRoot(): VaultDocument? {
         val tree = savedVaultUri() ?: return null
@@ -129,7 +162,7 @@ class VaultRepository(private val context: Context) {
 
     fun children(directory: VaultDocument): List<VaultDocument> {
         val tree = savedVaultUri() ?: return emptyList()
-        return listChildren(tree, directory.uri)
+        return listChildren(tree, directory.uri, directory.relativePath)
     }
 
     fun canReadDirectory(directory: VaultDocument): Boolean {
@@ -154,19 +187,14 @@ class VaultRepository(private val context: Context) {
     fun refreshDocument(document: VaultDocument): VaultDocument? {
         val tree = savedVaultUri() ?: return null
         val parent = document.parentUri ?: return null
-        return findChild(tree, parent, document.name)
+        return findChild(tree, parent, document.name, document.parentRelativePath)
     }
 
     fun relativeAttachmentPath(note: VaultDocument, attachments: PhotoAttachments): String {
-        val tree = savedVaultUri() ?: return "../${attachments.relativeDirectory}/${attachments.corrected}"
-        val dailyDirectory = findOrCreateDirectory(tree, dailyNoteDirectoryParts())
-        val levels = if (dailyDirectory != null && note.parentUri == dailyDirectory) {
-            dailyNoteDirectoryParts().size
-        } else {
-            1
-        }
-        val prefix = List(levels) { ".." }
-        return (prefix + attachments.relativeDirectory + attachments.corrected).joinToString("/")
+        return VaultRelativePath.attachmentPath(
+            note.parentRelativePath,
+            "${attachments.relativeDirectory}/${attachments.corrected}"
+        )
     }
 
     fun openDailyNote(): DailyNoteResult {
@@ -176,7 +204,8 @@ class VaultRepository(private val context: Context) {
             val directory = findOrCreateDirectory(tree, dailyNoteDirectoryParts())
                 ?: return DailyNoteResult.Failure(VaultFailureKind.READ_FAILED)
             val name = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".md"
-            val existing = findChild(tree, directory, name)
+            val dailyPath = dailyNoteDirectoryParts().joinToString("/")
+            val existing = findChild(tree, directory, name, dailyPath)
             if (existing != null) return DailyNoteResult.Existing(existing)
             val created = DocumentsContract.createDocument(
                 resolver,
@@ -184,7 +213,13 @@ class VaultRepository(private val context: Context) {
                 "text/markdown",
                 name
             ) ?: return DailyNoteResult.Failure(VaultFailureKind.READ_FAILED)
-            DailyNoteResult.Created(VaultDocument(created, name, "text/markdown", directory))
+            DailyNoteResult.Created(VaultDocument(
+                created,
+                name,
+                "text/markdown",
+                directory,
+                (dailyNoteDirectoryParts() + name).joinToString("/")
+            ))
         } catch (_: SecurityException) {
             DailyNoteResult.Failure(VaultFailureKind.PERMISSION_DENIED)
         } catch (_: Exception) {
@@ -287,35 +322,77 @@ class VaultRepository(private val context: Context) {
     fun saveText(uri: Uri, name: String, content: String, parentUri: Uri): Boolean =
         saveText(VaultDocument(uri, name, "text/markdown", parentUri), content)
 
-    /** Moves a note to the Vault-local trash without propagating a delete to sync providers. */
-    fun moveNoteToTrash(document: VaultDocument): Boolean {
-        val tree = savedVaultUri() ?: return false
-        val sourceParent = document.parentUri ?: return false
-        val trash = findOrCreateDirectory(tree, listOf(".trash")) ?: return false
-        val moved = try {
-            DocumentsContract.moveDocument(resolver, document.uri, sourceParent, trash)
-        } catch (_: Exception) {
-            null
-        }
-        if (moved != null) return true
+    fun createNote(parent: VaultDocument, requestedName: String): VaultMutationResult =
+        createChild(parent, requestedName, VaultEntryKind.NOTE)
 
-        // Some document providers do not implement moveDocument. Copying then deleting keeps the
-        // deletion workflow available on those providers while retaining the original on a failure.
-        val trashName = uniqueTrashName(tree, trash, document.name)
-        val copy = DocumentsContract.createDocument(resolver, trash, "text/markdown", trashName) ?: return false
+    fun createFolder(parent: VaultDocument, requestedName: String): VaultMutationResult =
+        createChild(parent, requestedName, VaultEntryKind.FOLDER)
+
+    fun rename(document: VaultDocument, requestedName: String): VaultMutationResult {
+        if (!isManageable(document)) return VaultMutationResult.Failure(VaultMutationFailureKind.RENAME_FAILED)
+        val parent = document.parentUri ?: return VaultMutationResult.Failure(VaultMutationFailureKind.RENAME_FAILED)
+        val kind = if (isDirectory(document)) VaultEntryKind.FOLDER else VaultEntryKind.NOTE
+        val validated = VaultNamePolicy.validate(requestedName, kind)
+        if (validated is VaultNameValidation.Invalid) {
+            return VaultMutationResult.Failure(VaultMutationFailureKind.INVALID_NAME, validated.message)
+        }
+        val validName = validated as VaultNameValidation.Valid
+        if (kind == VaultEntryKind.FOLDER && document.parentRelativePath.isEmpty() && VaultPathPolicy.isProtectedRootName(validName.actualName)) {
+            return VaultMutationResult.Failure(VaultMutationFailureKind.INVALID_NAME, "该名称由 Vault 保留")
+        }
         return try {
-            resolver.openInputStream(document.uri)?.use { input ->
-                resolver.openOutputStream(copy, "wt")?.use { output -> input.copyTo(output) }
-                    ?: throw IllegalStateException("Unable to write trash copy")
-            } ?: throw IllegalStateException("Unable to read note")
-            if (!DocumentsContract.deleteDocument(resolver, document.uri)) {
-                try { DocumentsContract.deleteDocument(resolver, copy) } catch (_: Exception) { }
-                return false
+            val tree = savedVaultUri() ?: return VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
+            val existing = listChildrenStrict(tree, parent, document.parentRelativePath).map { it.name }
+            if (VaultNamePolicy.conflicts(validName, existing, document.name)) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.NAME_CONFLICT, "当前目录已有同名笔记或文件夹")
             }
-            true
+            val renamed = DocumentsContract.renameDocument(resolver, document.uri, validName.actualName)
+                ?: return VaultMutationResult.Failure(VaultMutationFailureKind.RENAME_FAILED)
+            val resolved = resolveMutationDocument(parent, document.parentRelativePath, renamed)
+            val actualName = resolved?.name
+            val dailyChange = if (kind == VaultEntryKind.FOLDER) {
+                if (resolved != null) rewriteDailyDirectoryAfterRenameCommitted(document.relativePath, resolved.relativePath)
+                else resetDailyDirectoryIfRemovedCommitted(document.relativePath)
+            } else DailyDirectoryChange.UNCHANGED
+            VaultMutationResult.Success(
+                resolved,
+                validName.actualName,
+                actualName,
+                dailyChange
+            )
+        } catch (_: SecurityException) {
+            VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
         } catch (_: Exception) {
-            try { DocumentsContract.deleteDocument(resolver, copy) } catch (_: Exception) { }
-            false
+            VaultMutationResult.Failure(VaultMutationFailureKind.RENAME_FAILED)
+        }
+    }
+
+    /** Moves one direct child atomically; a provider that cannot move leaves the source untouched. */
+    fun moveToTrash(document: VaultDocument): VaultMutationResult {
+        if (!isManageable(document)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        val sourceParent = document.parentUri ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        return try {
+            val tree = savedVaultUri() ?: return VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
+            val trash = findOrCreateDirectory(tree, listOf(".trash"))
+                ?: return VaultMutationResult.Failure(VaultMutationFailureKind.CREATE_FAILED)
+            val moved = try {
+                DocumentsContract.moveDocument(resolver, document.uri, sourceParent, trash)
+            } catch (error: SecurityException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (moved != null) {
+                val resolved = resolveMutationDocument(trash, ".trash", moved)
+                val dailyChange = if (isDirectory(document)) resetDailyDirectoryIfRemovedCommitted(document.relativePath) else DailyDirectoryChange.UNCHANGED
+                return VaultMutationResult.Success(resolved, document.name, resolved?.name, dailyChange)
+            }
+            if (isDirectory(document)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+            moveNoteToTrashByCopy(tree, document, trash)
+        } catch (_: SecurityException) {
+            VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
+        } catch (_: Exception) {
+            VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
         }
     }
 
@@ -579,6 +656,117 @@ class VaultRepository(private val context: Context) {
         return parent
     }
 
+    private fun createChild(
+        parent: VaultDocument,
+        requestedName: String,
+        kind: VaultEntryKind
+    ): VaultMutationResult {
+        if (!isManageableParent(parent)) return VaultMutationResult.Failure(VaultMutationFailureKind.CREATE_FAILED)
+        val validated = VaultNamePolicy.validate(requestedName, kind)
+        if (validated is VaultNameValidation.Invalid) {
+            return VaultMutationResult.Failure(VaultMutationFailureKind.INVALID_NAME, validated.message)
+        }
+        val validName = validated as VaultNameValidation.Valid
+        if (kind == VaultEntryKind.FOLDER && parent.relativePath.isEmpty() && VaultPathPolicy.isProtectedRootName(validName.actualName)) {
+            return VaultMutationResult.Failure(VaultMutationFailureKind.INVALID_NAME, "该名称由 Vault 保留")
+        }
+        return try {
+            val tree = savedVaultUri() ?: return VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
+            val existing = listChildrenStrict(tree, parent.uri, parent.relativePath).map { it.name }
+            if (VaultNamePolicy.conflicts(validName, existing)) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.NAME_CONFLICT, "当前目录已有同名笔记或文件夹")
+            }
+            val mimeType = if (kind == VaultEntryKind.NOTE) "text/markdown" else DocumentsContract.Document.MIME_TYPE_DIR
+            val created = DocumentsContract.createDocument(resolver, parent.uri, mimeType, validName.actualName)
+                ?: return VaultMutationResult.Failure(VaultMutationFailureKind.CREATE_FAILED)
+            val resolved = resolveMutationDocument(parent.uri, parent.relativePath, created)
+            VaultMutationResult.Success(
+                resolved,
+                validName.actualName,
+                resolved?.name
+            )
+        } catch (_: SecurityException) {
+            VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
+        } catch (_: Exception) {
+            VaultMutationResult.Failure(VaultMutationFailureKind.CREATE_FAILED)
+        }
+    }
+
+    private fun isManageableParent(document: VaultDocument): Boolean =
+        isDirectory(document) && !isInternalPath(document.relativePath)
+
+    private fun isManageable(document: VaultDocument): Boolean =
+        document.relativePath.isNotEmpty() && !isInternalPath(document.relativePath)
+
+    private fun isInternalPath(relativePath: String): Boolean =
+        VaultPathPolicy.isProtected(relativePath)
+
+    private fun resolveMutationDocument(parent: Uri, parentRelativePath: String, uri: Uri): VaultDocument? {
+        val name = runCatching { documentName(uri) }.getOrNull()
+        if (name != null) {
+            return VaultDocument(uri, name, null, parent, joinRelativePath(parentRelativePath, name))
+        }
+        return runCatching {
+            listChildrenStrict(savedVaultUri() ?: return null, parent, parentRelativePath)
+                .firstOrNull { it.uri == uri }
+        }.getOrNull()
+    }
+
+    private fun moveNoteToTrashByCopy(tree: Uri, document: VaultDocument, trash: Uri): VaultMutationResult {
+        val sourceParent = document.parentUri ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        val existing = listChildrenStrict(tree, trash, ".trash").map { it.name }
+        val fallbackName = VaultTrashPolicy.uniqueNoteName(
+            document.name,
+            existing,
+            SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        )
+        val copy = DocumentsContract.createDocument(resolver, trash, "text/markdown", fallbackName)
+            ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        return try {
+            resolver.openInputStream(document.uri)?.use { input ->
+                resolver.openOutputStream(copy, "wt")?.use { output -> input.copyTo(output) }
+                    ?: throw IllegalStateException("Unable to write trash copy")
+            } ?: throw IllegalStateException("Unable to read note")
+            if (!DocumentsContract.deleteDocument(resolver, document.uri)) {
+                runCatching { DocumentsContract.deleteDocument(resolver, copy) }
+                return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+            }
+            val resolved = resolveMutationDocument(trash, ".trash", copy)
+            VaultMutationResult.Success(resolved, document.name, resolved?.name)
+        } catch (_: Exception) {
+            runCatching { DocumentsContract.deleteDocument(resolver, copy) }
+            VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        }
+    }
+
+    private fun rewriteDailyDirectoryAfterRenameCommitted(oldPath: String, newPath: String): DailyDirectoryChange {
+        val current = dailyNoteDirectoryPath()
+        val rewritten = VaultRelativePath.renamedDailyDirectory(current, oldPath, newPath)
+        if (rewritten == current) return DailyDirectoryChange.UNCHANGED
+        preferences.edit().putString(DAILY_NOTE_DIRECTORY_KEY, rewritten).commit()
+        return DailyDirectoryChange.REWRITTEN
+    }
+
+    private fun resetDailyDirectoryIfRemovedCommitted(removedPath: String): DailyDirectoryChange {
+        val current = dailyNoteDirectoryPath()
+        val reset = VaultRelativePath.resetIfRemoved(current, removedPath)
+        if (reset == current) return DailyDirectoryChange.UNCHANGED
+        preferences.edit().putString(DAILY_NOTE_DIRECTORY_KEY, reset)
+            .putBoolean(DAILY_DIRECTORY_RESET_NOTICE_KEY, true).commit()
+        return DailyDirectoryChange.RESET_TO_ROOT
+    }
+
+    private fun documentName(uri: Uri): String? = resolver.query(
+        uri,
+        arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+        null,
+        null,
+        null
+    )?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+
+    private fun joinRelativePath(parent: String, name: String): String =
+        listOf(parent, name).filter { it.isNotEmpty() }.joinToString("/")
+
     private fun nextPhotoId(tree: Uri, directory: Uri, extension: String): String? {
         val timestamp = SimpleDateFormat("HHmmss", Locale.US).format(Date())
         repeat(MAX_PHOTO_NAME_ATTEMPTS) {
@@ -595,33 +783,20 @@ class VaultRepository(private val context: Context) {
         return null
     }
 
-    private fun findChild(tree: Uri, parent: Uri, name: String): VaultDocument? {
-        return listChildren(tree, parent).firstOrNull { it.name == name }
+    private fun findChild(tree: Uri, parent: Uri, name: String, parentRelativePath: String = ""): VaultDocument? {
+        return listChildren(tree, parent, parentRelativePath).firstOrNull { it.name == name }
     }
 
-    private fun findChildStrict(tree: Uri, parent: Uri, name: String): VaultDocument? =
-        listChildrenStrict(tree, parent).firstOrNull { it.name == name }
+    private fun findChildStrict(tree: Uri, parent: Uri, name: String, parentRelativePath: String = ""): VaultDocument? =
+        listChildrenStrict(tree, parent, parentRelativePath).firstOrNull { it.name == name }
 
-    private fun uniqueTrashName(tree: Uri, trash: Uri, name: String): String {
-        if (findChild(tree, trash, name) == null) return name
-        val extension = name.substringAfterLast('.', "")
-        val stem = if (extension.isBlank()) name else name.removeSuffix(".$extension")
-        val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        repeat(100) { attempt ->
-            val suffix = if (attempt == 0) "-$timestamp" else "-$timestamp-${attempt + 1}"
-            val candidate = "$stem$suffix${if (extension.isBlank()) "" else ".$extension"}"
-            if (findChild(tree, trash, candidate) == null) return candidate
-        }
-        return "$stem-${UUID.randomUUID()}${if (extension.isBlank()) "" else ".$extension"}"
-    }
-
-    private fun listChildren(tree: Uri, parent: Uri): List<VaultDocument> = try {
-        listChildrenStrict(tree, parent)
+    private fun listChildren(tree: Uri, parent: Uri, parentRelativePath: String = ""): List<VaultDocument> = try {
+        listChildrenStrict(tree, parent, parentRelativePath)
     } catch (_: Exception) {
         emptyList()
     }
 
-    private fun listChildrenStrict(tree: Uri, parent: Uri): List<VaultDocument> {
+    private fun listChildrenStrict(tree: Uri, parent: Uri, parentRelativePath: String = ""): List<VaultDocument> {
         val parentId = DocumentsContract.getDocumentId(parent)
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
         val projection = arrayOf(
@@ -638,7 +813,13 @@ class VaultRepository(private val context: Context) {
                     val name = cursor.getString(nameIndex) ?: continue
                     val id = cursor.getString(idIndex) ?: continue
                     val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
-                    add(VaultDocument(uri, name, cursor.getString(mimeIndex), parent))
+                    add(VaultDocument(
+                        uri,
+                        name,
+                        cursor.getString(mimeIndex),
+                        parent,
+                        joinRelativePath(parentRelativePath, name)
+                    ))
                 }
             }
         } ?: throw IllegalStateException("Unable to enumerate Vault directory")
@@ -751,6 +932,7 @@ class VaultRepository(private val context: Context) {
         private const val VAULT_URI_KEY = "vault_uri"
         private const val APPEARANCE_MODE_KEY = "appearance_mode"
         private const val DAILY_NOTE_DIRECTORY_KEY = "daily_note_directory"
+        private const val DAILY_DIRECTORY_RESET_NOTICE_KEY = "daily_note_directory_reset_notice"
         private const val DEFAULT_DAILY_NOTE_DIRECTORY = "Daily Notes"
         const val APPEARANCE_DAY = "day"
         const val APPEARANCE_NIGHT = "night"

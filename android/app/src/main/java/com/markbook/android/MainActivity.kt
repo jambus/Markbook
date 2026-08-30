@@ -59,6 +59,8 @@ class MainActivity : Activity() {
     private val browserHistory = mutableListOf<VaultDocument>()
     private var browserScrollY = 0
     private var browserLoadGeneration = 0L
+    private var browserMutationPending = false
+    private var browserMutationMessage: String? = null
     private var dailyFolderDirectory: VaultDocument? = null
     private val dailyFolderPath = mutableListOf<String>()
     private val dailyFolderHistory = mutableListOf<VaultDocument>()
@@ -233,6 +235,7 @@ class MainActivity : Activity() {
             browserScrollY = 0
         }
         releaseEditor()
+        browserMutationPending = false
         screen = Screen.BROWSER
         val generation = ++browserLoadGeneration
         val requestedDirectory = browserDirectory
@@ -312,12 +315,22 @@ class MainActivity : Activity() {
         if (!directoryReadable) {
             content.addView(vaultAccessErrorState(), matchWrap())
         } else {
+            browserMutationMessage?.let { message ->
+                content.addView(infoBanner(message), matchWrap().apply { bottomMargin = dp(12) })
+            }
+            if (repository.dailyDirectoryResetNotice()) {
+                content.addView(infoBanner("今日笔记目录已不可用，已改为 Vault 根目录。请在设置中重新选择目录。"),
+                    matchWrap().apply { bottomMargin = dp(12) })
+            }
             sectionLabel(content, "文件夹", folders.size)
             if (folders.isEmpty()) {
                 content.addView(emptyState("当前目录没有文件夹"), matchWrap().apply { bottomMargin = dp(16) })
             } else {
                 folders.forEach { folder ->
-                    content.addView(vaultRow("▸", folder.name, "文件夹") { openDirectory(folder) }, matchWrap().apply {
+                    content.addView(vaultRow(
+                        "▸", folder.name, "文件夹", trailingLabel = "更多",
+                        trailingAction = { showDocumentMenu(folder) }
+                    ) { openDirectory(folder) }, matchWrap().apply {
                         bottomMargin = dp(8)
                     })
                 }
@@ -332,7 +345,8 @@ class MainActivity : Activity() {
                             "•",
                             note.name.removeSuffix(".md"),
                             previews[note.uri.toString()] ?: "空白笔记",
-                            trailingAction = { confirmMoveNoteToTrash(note) }
+                            trailingLabel = "更多",
+                            trailingAction = { showDocumentMenu(note) }
                         ) { openNote(note) },
                         matchWrap().apply { bottomMargin = dp(8) }
                     )
@@ -362,9 +376,13 @@ class MainActivity : Activity() {
     }
 
     private fun browserFooter(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
         setPadding(dp(16), dp(10), dp(16), dp(16))
         background = colorBlock(COLOR_SURFACE)
-        addView(action("打开今日笔记", true) { openDailyNote() }, LinearLayout.LayoutParams(-1, dp(48)))
+        addView(action("新建", false) { showCreateMenu() }, LinearLayout.LayoutParams(0, dp(48), 0.72f).apply {
+            marginEnd = dp(8)
+        })
+        addView(action("打开今日笔记", true) { openDailyNote() }, LinearLayout.LayoutParams(0, dp(48), 1.28f))
     }
 
     private fun showSettings() {
@@ -1183,26 +1201,222 @@ class MainActivity : Activity() {
         return note == null || currentNote?.uri == note.uri
     }
 
-    private fun confirmMoveNoteToTrash(note: VaultDocument) {
+    private fun showCreateMenu() {
+        if (browserMutationPending) return
+        browserMutationMessage = null
         AlertDialog.Builder(this)
-            .setTitle("移到回收站？")
-            .setMessage("“${note.name.removeSuffix(".md")}”将移入 Vault/.trash，不会同步到 Google Drive。图片附件会保留，方便之后恢复或清理。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("移到回收站") { _, _ ->
-                Thread {
-                    val success = repository.moveNoteToTrash(note)
-                    runOnUiThread {
-                        if (isFinishing || isDestroyed) return@runOnUiThread
-                        if (success) {
-                            toast("已移到回收站")
-                            showVaultBrowser()
-                        } else {
-                            toast("无法移到回收站，请检查 Vault 权限")
-                        }
-                    }
-                }.start()
+            .setTitle("新建")
+            .setItems(arrayOf("新建笔记", "新建文件夹")) { _, index ->
+                if (index == 0) showCreateDialog(VaultEntryKind.NOTE) else showCreateDialog(VaultEntryKind.FOLDER)
             }
             .show()
+    }
+
+    private fun showCreateDialog(kind: VaultEntryKind) {
+        val parent = browserDirectory ?: return
+        val input = EditText(this).apply {
+            hint = if (kind == VaultEntryKind.NOTE) "笔记名称" else "文件夹名称"
+            setSingleLine(true)
+            setPadding(dp(24), dp(4), dp(24), dp(4))
+        }
+        val verb = if (kind == VaultEntryKind.NOTE) "创建笔记" else "创建文件夹"
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(verb)
+            .setView(mutationDialogView(input, "当前位置：${parent.relativePath.ifBlank { "Vault 根目录" }}" + if (kind == VaultEntryKind.NOTE) "\n笔记会自动添加 .md" else ""))
+            .setNegativeButton("取消", null)
+            .setPositiveButton("创建", null)
+            .create()
+        dialog.setOnShowListener {
+            val submit = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            submit.setOnClickListener {
+                when (val validation = VaultNamePolicy.validate(input.text.toString(), kind)) {
+                    is VaultNameValidation.Invalid -> input.error = validation.message
+                    is VaultNameValidation.Valid -> {
+                        submit.isEnabled = false
+                        submit.text = "创建中…"
+                        dialog.setCancelable(false)
+                        dialog.setCanceledOnTouchOutside(false)
+                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+                        browserMutationPending = true
+                        val generation = browserLoadGeneration
+                        val requestedName = input.text.toString()
+                        noteIoExecutor.execute {
+                            val result = if (kind == VaultEntryKind.NOTE) {
+                                repository.createNote(parent, requestedName)
+                            } else {
+                                repository.createFolder(parent, requestedName)
+                            }
+                            runOnUiThread {
+                                if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
+                                browserMutationPending = false
+                                when (result) {
+                                    is VaultMutationResult.Success -> {
+                                        dialog.dismiss()
+                                        providerNameMessage(result)?.let(::toast)
+                                        val document = result.document
+                                        if (document == null) {
+                                            showVaultBrowser()
+                                        } else if (kind == VaultEntryKind.NOTE) openNote(document) else openDirectory(document)
+                                    }
+                                    is VaultMutationResult.Failure -> {
+                                        submit.isEnabled = true
+                                        submit.text = "创建"
+                                        dialog.setCancelable(true)
+                                        dialog.setCanceledOnTouchOutside(true)
+                                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = true
+                                        input.error = mutationFailureMessage(result)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showDocumentMenu(document: VaultDocument) {
+        if (browserMutationPending) return
+        browserMutationMessage = null
+        AlertDialog.Builder(this)
+            .setTitle(document.name)
+            .setItems(arrayOf("重命名", "移到回收站")) { _, index ->
+                if (index == 0) showRenameDialog(document) else confirmMoveToTrash(document)
+            }
+            .show()
+    }
+
+    private fun showRenameDialog(document: VaultDocument) {
+        val kind = if (repository.isDirectory(document)) VaultEntryKind.FOLDER else VaultEntryKind.NOTE
+        val input = EditText(this).apply {
+            setText(if (kind == VaultEntryKind.NOTE) document.name.removeSuffix(".md") else document.name)
+            selectAll()
+            setSingleLine(true)
+            setPadding(dp(24), dp(4), dp(24), dp(4))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("重命名")
+            .setView(mutationDialogView(input, "当前位置：${document.parentRelativePath.ifBlank { "Vault 根目录" }}\n不会更新其他 Markdown 链接"))
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存", null)
+            .create()
+        dialog.setOnShowListener {
+            val submit = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            submit.setOnClickListener {
+                when (val validation = VaultNamePolicy.validate(input.text.toString(), kind)) {
+                    is VaultNameValidation.Invalid -> input.error = validation.message
+                    is VaultNameValidation.Valid -> {
+                        submit.isEnabled = false
+                        submit.text = "保存中…"
+                        dialog.setCancelable(false)
+                        dialog.setCanceledOnTouchOutside(false)
+                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+                        browserMutationPending = true
+                        val generation = browserLoadGeneration
+                        val requestedName = input.text.toString()
+                        noteIoExecutor.execute {
+                            val result = repository.rename(document, requestedName)
+                            runOnUiThread {
+                                if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
+                                browserMutationPending = false
+                                when (result) {
+                                    is VaultMutationResult.Success -> {
+                                        dialog.dismiss()
+                                        providerNameMessage(result)?.let(::toast)
+                                        dailyDirectoryChangeMessage(result.dailyDirectoryChange)?.let(::toast)
+                                        showVaultBrowser()
+                                    }
+                                    is VaultMutationResult.Failure -> {
+                                        submit.isEnabled = true
+                                        submit.text = "保存"
+                                        dialog.setCancelable(true)
+                                        dialog.setCanceledOnTouchOutside(true)
+                                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = true
+                                        input.error = mutationFailureMessage(result)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun confirmMoveToTrash(document: VaultDocument) {
+        val label = if (repository.isDirectory(document)) "文件夹“${document.name}”" else "笔记“${document.name.removeSuffix(".md")}”"
+        AlertDialog.Builder(this)
+            .setTitle("移到回收站？")
+            .setMessage("$label 将整体移入 Vault/.trash，不会同步到 Google Drive。Markdown 链接不会更新，图片附件不会自动删除。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("移到回收站") { _, _ ->
+                val generation = browserLoadGeneration
+                browserMutationPending = true
+                val progress = AlertDialog.Builder(this)
+                    .setTitle("正在移到回收站…")
+                    .setMessage("正在处理 Vault 文件；请勿重复操作。")
+                    .create()
+                progress.setCancelable(false)
+                progress.setCanceledOnTouchOutside(false)
+                progress.show()
+                noteIoExecutor.execute {
+                    val result = repository.moveToTrash(document)
+                    runOnUiThread {
+                        progress.dismiss()
+                        if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
+                        browserMutationPending = false
+                        when (result) {
+                            is VaultMutationResult.Success -> {
+                                toast(dailyDirectoryChangeMessage(result.dailyDirectoryChange) ?: "已移到回收站")
+                                showVaultBrowser()
+                            }
+                            is VaultMutationResult.Failure -> {
+                                browserMutationMessage = "移动未完成，源文件未改动。请从“更多”重试，或重新选择 Vault。\n${mutationFailureMessage(result)}"
+                                showVaultBrowser()
+                            }
+                        }
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun providerNameMessage(result: VaultMutationResult.Success): String? =
+        when {
+            result.actualName == null -> "操作已完成，名称待刷新"
+            result.requestedName == result.actualName -> null
+            else -> "Provider 已保存为“${result.actualName}”"
+        }
+
+    private fun mutationDialogView(input: EditText, message: String): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(8), 0, dp(8), 0)
+        addView(TextView(this@MainActivity).apply {
+            text = message
+            textSize = 13f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(dp(16), 0, dp(16), dp(8))
+        }, matchWrap())
+        addView(input, matchWrap())
+    }
+
+    private fun dailyDirectoryChangeMessage(change: DailyDirectoryChange): String? = when (change) {
+        DailyDirectoryChange.UNCHANGED -> null
+        DailyDirectoryChange.REWRITTEN -> "今日笔记目录已随文件夹重命名更新"
+        DailyDirectoryChange.RESET_TO_ROOT -> "今日笔记目录已改为 Vault 根目录"
+    }
+
+    private fun mutationFailureMessage(result: VaultMutationResult.Failure): String = result.message ?: when (result.kind) {
+        VaultMutationFailureKind.PERMISSION_DENIED -> "无法访问 Vault，请重新选择"
+        VaultMutationFailureKind.READ_FAILED -> "无法读取当前目录，请稍后重试"
+        VaultMutationFailureKind.INVALID_NAME -> "名称不合法"
+        VaultMutationFailureKind.NAME_CONFLICT -> "当前目录已有同名项目"
+        VaultMutationFailureKind.CREATE_FAILED -> "无法创建，请检查 Vault 权限"
+        VaultMutationFailureKind.RENAME_FAILED -> "无法重命名，请检查 Vault 权限"
+        VaultMutationFailureKind.TRASH_NAME_CONFLICT -> "回收站已有同名项目"
+        VaultMutationFailureKind.MOVE_UNSUPPORTED -> "无法移到回收站：当前 Provider 不支持整体移动，原文件未改动"
     }
 
     private fun showEditor(note: VaultDocument, content: String) {
@@ -1812,11 +2026,7 @@ class MainActivity : Activity() {
     }
 
     private fun editorContext(note: VaultDocument): String {
-        val location = when {
-            browserPath.isNotEmpty() -> browserPath.joinToString(" / ")
-            repository.dailyNoteDirectoryPath().isNotBlank() -> repository.dailyNoteDirectoryPath()
-            else -> "Vault 根目录"
-        }
+        val location = note.parentRelativePath.ifBlank { "Vault 根目录" }
         return "$currentVaultName · $location · ${note.name}"
     }
 
@@ -1824,6 +2034,7 @@ class MainActivity : Activity() {
         icon: String,
         title: String,
         subtitle: String,
+        trailingLabel: String = "",
         trailingAction: (() -> Unit)? = null,
         action: () -> Unit
     ): View = LinearLayout(this).apply {
@@ -1867,10 +2078,7 @@ class MainActivity : Activity() {
                 setTextColor(COLOR_MUTED_TEXT)
             }, LinearLayout.LayoutParams(dp(28), dp(44)))
         } else {
-            addView(
-                formatIconAction(R.drawable.ic_note_delete, "删除笔记", trailingAction),
-                LinearLayout.LayoutParams(dp(44), dp(44))
-            )
+            addView(action(trailingLabel, false, trailingAction), LinearLayout.LayoutParams(dp(56), dp(44)))
         }
     }
 
@@ -1970,8 +2178,8 @@ class MainActivity : Activity() {
     }
 
     private fun isInternalDocument(document: VaultDocument): Boolean {
-        if (document.name.startsWith(".")) return true
-        return repository.isDirectory(document) && document.name in setOf("assets", "attachments", ".markbook")
+        val leaf = document.relativePath.substringAfterLast('/')
+        return VaultPathPolicy.isProtected(document.relativePath) || leaf.startsWith(".markbook-")
     }
 
     private fun notePreview(note: VaultDocument): String {

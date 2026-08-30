@@ -28,6 +28,46 @@ either file and retries on a collision.
 Existing UUID-based names, including `photo-<uuid>.<ext>`, remain readable for
 backward compatibility under the legacy `attachments/` directory.
 
+## User-managed files and folders
+
+Users may create Markdown notes and ordinary folders at any depth below the
+Vault root. The Vault root itself and the internal root children `.obsidian`,
+`.markbook`, `.trash`, `assets`, and `attachments` are not user-manageable file-library
+entries. Existing entries that do not meet current creation rules remain
+readable and browsable.
+
+New note and folder base names are NFC-normalized and must be unique in their
+parent directory using `Locale.ROOT` lowercase comparison; notes and folders
+share that namespace. Names may contain Chinese and emoji, but must not be
+empty, `.` or `..`, begin with `.`, have leading/trailing whitespace or a
+trailing `.`, contain a control character or `/\\<>:\"|?*`, be a Windows reserved
+name, or exceed 240 UTF-8 bytes. A new note accepts an optional `.md` suffix
+and is persisted with exactly one lowercase `.md`; a folder has no suffix.
+Clients never overwrite an existing child to satisfy a create or rename.
+
+Rename and create report both the requested and provider-returned actual name.
+If a document provider changes the requested name, the client must retain and
+show that actual name rather than silently presenting the request as successful.
+
+Deleting a note or folder means moving the one direct child as a whole to the
+Vault-root `.trash/`. A non-empty folder must use the provider's atomic
+`moveDocument` semantics; clients must not emulate unsupported moves with a
+recursive copy-and-delete. If the move fails or is unsupported, the source and
+its contents remain in place. Moving or renaming does not rewrite Markdown
+links and does not automatically delete attachments.
+
+For a note whose parent relative path is `p`, a new attachment reference is the
+POSIX relative path from `p` to `assets/<note-stem>/...`; this applies equally
+to root notes, daily notes, and arbitrarily deep ordinary notes. If a folder is
+renamed and the configured daily-note directory is that folder or a descendant,
+clients synchronously rewrite the matching path prefix to the provider's actual
+new name. If moving a folder to `.trash/` removes the configured directory or
+one of its ancestors, clients synchronously reset the configuration to the
+Vault root and keep a visible warning until the user chooses a new directory.
+If a provider reports successful rename but its actual name cannot be resolved,
+the client resets an affected daily-note directory to the Vault root rather
+than retaining a stale or requested-only path.
+
 ## Recovery and Conflicts
 
 Temporary files and transaction markers are prefixed with `.markbook-` and must
