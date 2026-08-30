@@ -2,44 +2,51 @@
 
 ## Agent Routing, Review, and Git Control
 
-Use **Terra with xhigh reasoning effort** as the primary coordinator. It owns
+Use **Terra with high reasoning effort** as the primary coordinator. It owns
 scope, integration, validation, and the final report; delegating work never
 transfers that accountability.
 
-Route work by risk and task shape:
+Select the model and reasoning level deliberately:
 
-- **Routine, isolated work → Terra Main:** focused UI or content changes,
-  documentation, small refactors, and targeted tests. Do not delegate merely
-  to parallelize.
-- **Mechanical work → Luna:** bounded discovery, formatting, inventories,
-  boilerplate, test data, or specified renames. Terra verifies the result.
-- **Architecture, hard bugs, persistence, migration, compatibility, security,
-  or cross-client work → Sol:** provide the relevant files, constraints,
-  alternatives, evidence, and required decision.
+- **Terra, `medium`:** questions, read-only checks, small documentation edits,
+  and simple inventories.
+- **Terra, `high`:** the default for implementation, focused tests, and ordinary
+  UI or logic work.
+- **Terra or Sol, `xhigh`:** only when a hard bug, migration, or measured task
+  complexity benefits from the added reasoning.
+- **Luna, `low` or `medium`:** bounded mechanical work—discovery, formatting,
+  inventories, boilerplate, or test-data preparation. Terra verifies results.
+- **Sol, `high`:** architecture, unresolved lifecycle or persistence bugs,
+  security, Vault-contract changes, compatibility, and final high-risk review.
 
-For a feature implementation, persistence or concurrency change, cross-client
-contract change, or change spanning multiple production files, use this required
-role sequence:
+Classify implementation work before delegating; file count alone is not a risk
+signal.
 
-1. **Sol architect (read-only, `gpt-5.6-sol`, high):** inspect design, contract,
-   specs, code, and tests; define boundaries, risks, acceptance criteria, and
-   required validation.
-2. **Terra developer (`gpt-5.6-terra`, high):** update design/contract/spec/task
-   documentation before implementation, own production-file edits, and add
-   implementation tests.
-3. **Independent Terra tester (`gpt-5.6-terra`, high):** inspect the actual diff,
-   run relevant checks, distinguish automated and real-device evidence, and do
-   not modify production code.
-4. **Original Sol reviewer (read-only):** review the implementation and test
-   evidence for regressions, data safety, contract compliance, and UX. Return
-   findings to Terra for repair; the tester reruns affected checks.
+| Level | Scope | Required workflow |
+| --- | --- | --- |
+| L0 | Questions, read-only work, typo fixes, isolated documentation | Terra only; no sub-agent. |
+| L1 | Local UI or pure-logic change without persistence, permissions, or contract effects | Terra implements and runs focused tests. |
+| L2 | Multi-screen or substantial user-visible feature without Vault/sync/concurrency risk | Sol provides a short read-only design review; Terra implements and validates; the same Sol agent performs final review. |
+| L3 | Vault data, deletes, permissions, sync, concurrency, migrations, cross-client contracts, or security | Full Sol → Terra developer → independent Terra tester → original Sol reviewer sequence. |
 
-Simple questions, read-only checks, typo fixes, and isolated documentation edits
-may skip the sequence; say why when implementation work might reasonably be
-expected. Do not let agents edit the same files concurrently. Preserve user
-changes, give each editing phase explicit file ownership, and keep task records
-singular. Do not delegate secret handling, destructive actions, or ambiguous
-scope decisions without user authorization.
+For L2 and L3, the developer updates design, contract, spec, plan, and task
+documents before implementation when the change affects them. Sol findings must
+cite concrete files and acceptance criteria. The independent L3 tester does not
+modify production code, distinguishes automated from real-device evidence, and
+reruns affected checks after repairs.
+
+Use a compact handoff card for every sub-agent: objective, in-scope and
+out-of-scope boundaries, relevant files, non-negotiable constraints, and exact
+acceptance commands. Do not pass full conversation history when that card and
+the named files are sufficient. Do not let agents edit the same files
+concurrently; preserve user changes, give each editing phase explicit file
+ownership, and keep task records singular.
+
+The developer runs fast, affected checks during implementation. The independent
+tester runs the final full suite once per accepted implementation revision; do
+not repeat full builds in every role unless diagnosing a failure. Do not delegate
+secret handling, destructive actions, or ambiguous scope decisions without user
+authorization.
 
 ### Git Change Control
 
