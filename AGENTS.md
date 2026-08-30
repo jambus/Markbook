@@ -1,33 +1,59 @@
 # Repository Guidelines
 
-## Daily Vibe Coding & Model Routing
+## Agent Routing, Review, and Git Control
 
-Use **Terra with xhigh reasoning effort** by default. Terra Main owns each task
-end to end: establish context, make the smallest safe change, validate it, and
-report the result. Do not delegate routine work merely to parallelize it.
+Use **Terra with xhigh reasoning effort** as the primary coordinator. It owns
+scope, integration, validation, and the final report; delegating work never
+transfers that accountability.
 
-Route work by risk and reasoning depth:
+Route work by risk and task shape:
 
-- **Routine request → Terra Main:** localized UI or content changes,
-  straightforward implementation, focused tests, documentation, and small
-  refactors with clear acceptance criteria.
-- **Complex architecture → Sol:** cross-module/client design, Vault-contract
-  implications, migrations, compatibility, security, or multiple plausible
-  approaches. Provide files, constraints, alternatives, and the decision needed.
-- **Hard bug → Sol:** an unresolved reproducible, concurrency, lifecycle,
-  persistence, flaky, or cross-platform failure. Include repro, expected vs.
-  observed behavior, attempted fixes, logs, and relevant code.
-- **Completed feature → Sol review:** review correctness, regression risk,
-  contract compliance, test coverage, and user-visible behavior; resolve or
-  explicitly defer findings.
-- **Mechanical work → Luna:** repetitive, low-risk, specified work such as
-  discovery, formatting, boilerplate, test data, renames, and inventories. Give
-  exact scope and acceptance checks; Terra verifies the result.
+- **Routine, isolated work → Terra Main:** focused UI or content changes,
+  documentation, small refactors, and targeted tests. Do not delegate merely
+  to parallelize.
+- **Mechanical work → Luna:** bounded discovery, formatting, inventories,
+  boilerplate, test data, or specified renames. Terra verifies the result.
+- **Architecture, hard bugs, persistence, migration, compatibility, security,
+  or cross-client work → Sol:** provide the relevant files, constraints,
+  alternatives, evidence, and required decision.
 
-Escalation does not transfer accountability: Terra integrates and validates the
-outcome. Do not delegate secret handling, destructive operations, or ambiguous
-scope decisions without explicit user authorization. Sol review supplements the
-required design documentation and checklist for user-visible changes.
+For a feature implementation, persistence or concurrency change, cross-client
+contract change, or change spanning multiple production files, use this required
+role sequence:
+
+1. **Sol architect (read-only, `gpt-5.6-sol`, high):** inspect design, contract,
+   specs, code, and tests; define boundaries, risks, acceptance criteria, and
+   required validation.
+2. **Terra developer (`gpt-5.6-terra`, high):** update design/contract/spec/task
+   documentation before implementation, own production-file edits, and add
+   implementation tests.
+3. **Independent Terra tester (`gpt-5.6-terra`, high):** inspect the actual diff,
+   run relevant checks, distinguish automated and real-device evidence, and do
+   not modify production code.
+4. **Original Sol reviewer (read-only):** review the implementation and test
+   evidence for regressions, data safety, contract compliance, and UX. Return
+   findings to Terra for repair; the tester reruns affected checks.
+
+Simple questions, read-only checks, typo fixes, and isolated documentation edits
+may skip the sequence; say why when implementation work might reasonably be
+expected. Do not let agents edit the same files concurrently. Preserve user
+changes, give each editing phase explicit file ownership, and keep task records
+singular. Do not delegate secret handling, destructive actions, or ambiguous
+scope decisions without user authorization.
+
+### Git Change Control
+
+Default handoff is an **unstaged working-tree diff** with changed-file and test
+evidence. Never run `git add`, `git commit`, `git push`, `git cherry-pick`,
+`git merge`, `git rebase`, `git reset`, `git restore`, branch switching, or other
+history-changing operations unless the user explicitly requests that exact class
+of Git action in the current request. Earlier approval does not persist.
+
+Before any requested migration between worktrees or branches, inspect both
+working trees for uncommitted changes, explain the proposed transfer and conflict
+strategy, and preserve unrelated user work. Do not make a migration commit unless
+the user explicitly asks for a commit; otherwise leave the migrated changes
+unstaged for user review.
 
 ## Project Structure & Module Organization
 
@@ -71,94 +97,6 @@ history. Before producing a candidate build, update the release notes, affected
 platform spec and acceptance record, Android `versionName`, and monotonically
 increasing `versionCode`. Do not mark a development baseline as released before
 its required Mate real-device checks are recorded.
-
-## Multi-Agent Development Workflow
-
-Use sub-agents for non-trivial implementation work. The primary agent acts as
-the coordinator, controls handoffs between roles, and owns the final result.
-
-### Architecture and Review Agent
-
-- Model: `gpt-5.6-sol`.
-- Reasoning effort: `high` unless the task clearly requires a different level.
-- Inspect the relevant design documents, Vault contract, specs, tests, and
-  existing implementation before proposing changes.
-- Define architectural boundaries, compatibility risks, acceptance criteria,
-  implementation constraints, and required tests.
-- Review completed changes for correctness, regressions, data safety,
-  concurrency issues, and consistency with the shared Vault contract.
-- Remain read-only unless the user explicitly asks this role to edit files.
-- Cite concrete files and code locations in architecture and review findings.
-- Reuse the same Sol agent for the final review when possible so that the
-  original architectural context is preserved.
-
-### Development Agent
-
-- Model: `gpt-5.6-terra`.
-- Reasoning effort: `high` unless the task clearly requires a different level.
-- Implement the approved in-scope changes and own production-file edits during
-  the implementation phase.
-- Update required design, contract, spec, plan, task, acceptance, and release
-  documentation in the order defined by this repository guide.
-- Add or update automated tests together with the implementation.
-- Report changed files, implementation decisions, and known limitations before
-  handing the work to the test and review roles.
-
-### Test Agent
-
-- Model: `gpt-5.6-terra`.
-- Reasoning effort: `high` unless the task clearly requires a different level.
-- Act independently from the development agent and inspect the actual diff
-  before selecting validation coverage.
-- Run the relevant Android, HAP, and shared-contract checks and add focused
-  regression tests when the assigned scope permits test-file edits.
-- Verify acceptance criteria, failure paths, persistence behavior, and version
-  metadata; distinguish compilation, automated tests, emulator checks, and real
-  device evidence.
-- Do not modify production code. Return reproducible failures to the development
-  agent and retest after fixes.
-- Report exact commands, results, warnings, skipped checks, and remaining device
-  validation.
-
-### Required Role Workflow
-
-For feature implementation, persistence or concurrency changes, cross-client
-contract changes, or changes spanning multiple production files, the primary
-agent MUST use the following workflow:
-
-1. Spawn a `gpt-5.6-sol` architecture and review agent for read-only analysis.
-2. Evaluate its proposal and define the accepted implementation scope.
-3. Spawn a `gpt-5.6-terra` development agent to implement that scope and add
-   implementation-level tests.
-4. Spawn a separate `gpt-5.6-terra` test agent to inspect and validate the
-   resulting change independently.
-5. Send the implementation and test evidence to the original Sol agent for code
-   review.
-6. Send actionable test or review findings to the development agent for fixes.
-7. Ask the test agent to rerun affected checks after fixes, then have the primary
-   agent inspect the final diff and evidence before reporting completion.
-
-The primary agent may skip this workflow for simple questions, read-only status
-checks, typo fixes, and isolated documentation-only edits. It should state why
-the workflow is skipped when the user could reasonably expect implementation
-work.
-
-### Multi-Agent Coordination Rules
-
-- Do not let multiple agents edit the same files concurrently.
-- Architecture and review may run alongside independent read-only research, but
-  editing phases must have explicit file ownership.
-- All agents share the same workspace. Inspect the working tree before editing
-  and preserve existing user changes.
-- Keep task scope and ownership singular. Do not duplicate task records merely
-  because multiple agents participated.
-- Do not stage, commit, push, install builds, or perform destructive actions
-  unless the user requested them.
-- A review is not complete until every finding is fixed, rejected with concrete
-  evidence, or recorded as an accepted risk.
-- The primary agent remains responsible for final validation and must inspect
-  commands, outputs, diffs, and unresolved warnings rather than treating an
-  agent summary as proof.
 
 ## Build, Test, and Development Commands
 
