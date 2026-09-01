@@ -4,7 +4,7 @@ sealed class RecoveryArtifact {
     object Ignore : RecoveryArtifact()
     object DeleteTemporary : RecoveryArtifact()
     data class RestoreBackup(val originalName: String) : RecoveryArtifact()
-    object ResolvePhotoTransaction : RecoveryArtifact()
+    object ResolveAttachmentTransaction : RecoveryArtifact()
 }
 
 /** Pure classification for interrupted Markbook artifacts found anywhere in a Vault. */
@@ -17,7 +17,7 @@ object VaultRecoveryPolicy {
                 val original = name.removePrefix(".markbook-").removeSuffix(".bak")
                 if (original.isBlank()) RecoveryArtifact.Ignore else RecoveryArtifact.RestoreBackup(original)
             }
-            name.endsWith(".txn") && attachmentDirectory -> RecoveryArtifact.ResolvePhotoTransaction
+            name.endsWith(".txn") && attachmentDirectory -> RecoveryArtifact.ResolveAttachmentTransaction
             else -> RecoveryArtifact.Ignore
         }
     }

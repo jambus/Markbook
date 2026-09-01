@@ -32,7 +32,7 @@ class VaultRecoveryPolicyTest {
             VaultRecoveryPolicy.classify(".markbook-120000-ab12.txn", false)
         )
         assertEquals(
-            RecoveryArtifact.ResolvePhotoTransaction,
+            RecoveryArtifact.ResolveAttachmentTransaction,
             VaultRecoveryPolicy.classify(".markbook-120000-ab12.txn", true)
         )
     }

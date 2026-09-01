@@ -7,11 +7,17 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import java.io.File
+import java.util.Locale
 
 class CaptureFileProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
-    override fun getType(uri: Uri): String = "image/jpeg"
+    override fun getType(uri: Uri): String = when (captureFile(uri)?.extension?.lowercase(Locale.ROOT)) {
+        "mp4" -> "video/mp4"
+        "3gp", "3gpp" -> "video/3gpp"
+        "png" -> "image/png"
+        else -> "image/jpeg"
+    }
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val file = captureFile(uri) ?: return null

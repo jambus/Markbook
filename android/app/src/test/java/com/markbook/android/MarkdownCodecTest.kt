@@ -130,6 +130,25 @@ class MarkdownCodecTest {
     }
 
     @Test
+    fun linkWithAngleBracketsAndSpacesStaysClickable() {
+        assertEquals(
+            "<p><a href=\"../assets/会议 记录/120000-ab12-v.mp4\">视频 00:00:05</a></p>",
+            render("[视频 00:00:05](<../assets/会议 记录/120000-ab12-v.mp4>)\n")
+        )
+    }
+
+    @Test
+    fun videoLinkWithSpacesAndParenthesesRoundTripsThroughAnchorSerialization() {
+        val destination = "../assets/会议 记录/120000-ab12-v (final).mp4"
+        val markdown = MarkdownCodec.serializeLink("视频 00:00:05", destination)
+        assertEquals("[视频 00:00:05](<$destination>)", markdown)
+        assertEquals(
+            "<p><a href=\"$destination\">视频 00:00:05</a></p>",
+            render(markdown + "\n")
+        )
+    }
+
+    @Test
     fun emphasisIsRendered() {
         assertEquals("<p><strong>bold</strong> and <em>italic</em></p>", render("**bold** and *italic*\n"))
     }

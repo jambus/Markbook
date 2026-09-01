@@ -17,6 +17,7 @@ fail() {
 grep -Fq '[[项目索引]]' "$note" || fail 'missing wikilink fixture'
 grep -Fq '../assets/2026-01-02/120000-a1b2-o.jpg' "$note" || fail 'missing original image link'
 grep -Fq '../assets/2026-01-02/120000-a1b2-c.jpg' "$note" || fail 'missing corrected image link'
+grep -Fq '[视频 00:00:05](<../assets/2026-01-02/120005-v9z3-v.mp4>)' "$note" || fail 'missing video link fixture'
 
 if find "$fixture" -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print -quit | grep -q .; then
   fail 'fixture contains a database file'

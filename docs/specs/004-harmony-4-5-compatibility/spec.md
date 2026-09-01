@@ -27,7 +27,7 @@ Markbook 提供两套独立安装包：
 
 ### US1 两端继续使用同一个 Vault（P1）
 
-用户在 Android APK 中创建或编辑笔记并插入照片后，可以在 HAP 中重新选择同一个 Vault
+用户在 Android APK 中创建或编辑笔记并插入照片或视频链接后，可以在 HAP 中重新选择同一个 Vault
 继续编辑，不需要导出、复制或转换。
 
 **Acceptance**: HAP 打开 APK 已写入的测试 Vault，笔记、原图、校正图和相对链接均可用；
@@ -49,7 +49,7 @@ Obsidian 直接读取。
   [`docs/contracts/vault-contract.md`](../../contracts/vault-contract.md)。
 - **FR-402** 用户必须可以在 HAP 中重新授权 APK 使用过的 Vault，并继续编辑而无需
   导入、转换、重命名或复制为私有格式。
-- **FR-403** 两端生成的 Markdown、附件命名、相对链接、图片输出、事务恢复和冲突结果
+- **FR-403** 两端生成的 Markdown、附件命名、相对链接、图片/视频输出、事务恢复和冲突结果
   必须通过同一组共享样例测试。
 - **FR-404** 两端权限模型不同只允许改变授权步骤；权限失效时必须要求重新授权同一
   Vault，不得创建静默分叉副本。

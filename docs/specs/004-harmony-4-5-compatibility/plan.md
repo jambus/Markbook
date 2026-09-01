@@ -26,7 +26,7 @@ Markbook/
 - HarmonyOS 平台 API、构建、签名和设备适配属于 `006`。
 - 共享契约：UTF-8 `.md`、Vault 原目录、POSIX 风格相对链接、
   `assets/<note-file-stem>/`、`<HHmmss>-<xxxx>-o.<ext>` 与
-  `<HHmmss>-<xxxx>-c.<ext>` 成对命名、冲突副本和回收站约定；两端继续兼容已有
+  `<HHmmss>-<xxxx>-c.<ext>` 成对命名及 `<HHmmss>-<xxxx>-v.{mp4|3gp}` 视频命名、冲突副本和回收站约定；两端继续兼容已有
   `attachments/` 中的 UUID 命名历史文件。
 - 同步 Provider 在两端分别实现，但必须通过同一组文件级契约测试。
 

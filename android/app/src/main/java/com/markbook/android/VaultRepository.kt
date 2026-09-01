@@ -6,6 +6,8 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.File
+import java.io.FileInputStream
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -27,6 +29,12 @@ data class VaultDocument(
 data class PhotoAttachments(
     val original: String,
     val corrected: String,
+    val relativeDirectory: String,
+    val transactionUri: Uri
+)
+
+data class VideoAttachment(
+    val name: String,
     val relativeDirectory: String,
     val transactionUri: Uri
 )
@@ -197,6 +205,41 @@ class VaultRepository(private val context: Context) {
         )
     }
 
+    fun relativeAttachmentPath(note: VaultDocument, attachment: VideoAttachment): String =
+        VaultRelativePath.attachmentPath(note.parentRelativePath, "${attachment.relativeDirectory}/${attachment.name}")
+
+    fun savePendingVideoCapture(session: PendingVideoCaptureSession) {
+        preferences.edit()
+            .putString(PENDING_VIDEO_NOTE_URI, session.noteUri)
+            .putString(PENDING_VIDEO_NOTE_PATH, session.noteRelativePath)
+            .putString(PENDING_VIDEO_HASH, session.contentSha256)
+            .putInt(PENDING_VIDEO_CARET, session.caretOffset)
+            .putInt(PENDING_VIDEO_SCROLL, session.scrollY)
+            .putString(PENDING_VIDEO_CACHE, session.cachePath)
+            .putString(PENDING_VIDEO_STAGE, session.stage)
+            .putString(PENDING_VIDEO_ATTACHMENT_PATH, session.attachmentVaultPath)
+            .commit()
+    }
+
+    fun pendingVideoCapture(): PendingVideoCaptureSession? {
+        val noteUri = preferences.getString(PENDING_VIDEO_NOTE_URI, null) ?: return null
+        val notePath = preferences.getString(PENDING_VIDEO_NOTE_PATH, null) ?: return null
+        val hash = preferences.getString(PENDING_VIDEO_HASH, null) ?: return null
+        val cachePath = preferences.getString(PENDING_VIDEO_CACHE, null) ?: return null
+        val stage = preferences.getString(PENDING_VIDEO_STAGE, null) ?: return null
+        return PendingVideoCaptureSession(
+            noteUri, notePath, hash, preferences.getInt(PENDING_VIDEO_CARET, 0),
+            preferences.getInt(PENDING_VIDEO_SCROLL, 0), cachePath, stage,
+            preferences.getString(PENDING_VIDEO_ATTACHMENT_PATH, null)
+        )
+    }
+
+    fun clearPendingVideoCapture() {
+        preferences.edit().remove(PENDING_VIDEO_NOTE_URI).remove(PENDING_VIDEO_NOTE_PATH)
+            .remove(PENDING_VIDEO_HASH).remove(PENDING_VIDEO_CARET).remove(PENDING_VIDEO_SCROLL)
+            .remove(PENDING_VIDEO_CACHE).remove(PENDING_VIDEO_STAGE).remove(PENDING_VIDEO_ATTACHMENT_PATH).commit()
+    }
+
     fun openDailyNote(): DailyNoteResult {
         return try {
             val tree = savedVaultUri()
@@ -257,6 +300,7 @@ class VaultRepository(private val context: Context) {
             val tree = savedVaultUri()
                 ?: return VaultRecoveryResult.Failure(VaultFailureKind.PERMISSION_DENIED)
             recoverVaultDirectory(tree, rootDocument(tree), "")
+            recoverPendingVideoCapture(tree)
             VaultRecoveryResult.Success
         } catch (_: SecurityException) {
             VaultRecoveryResult.Failure(VaultFailureKind.PERMISSION_DENIED)
@@ -447,7 +491,7 @@ class VaultRepository(private val context: Context) {
         val noteFolder = assetFolderName(noteName)
         val relativeDirectory = "assets/$noteFolder"
         val directory = findOrCreateDirectory(tree, listOf("assets", noteFolder)) ?: return null
-        val id = nextPhotoId(tree, directory, extension) ?: return null
+        val id = nextCaptureId(tree, directory) ?: return null
         val originalName = "$id-o.$extension"
         val correctedName = "$id-c.$extension"
         val marker = DocumentsContract.createDocument(
@@ -499,12 +543,152 @@ class VaultRepository(private val context: Context) {
     fun rollbackPhotoPair(attachments: PhotoAttachments) {
         val tree = savedVaultUri() ?: return
         val directory = findByRelativePath(tree, attachments.relativeDirectory)?.uri ?: return
-        try { DocumentsContract.deleteDocument(resolver, attachments.transactionUri) } catch (_: Exception) { }
+        var allDeleted = true
         listOf(attachments.original, attachments.corrected).forEach { name ->
             findChild(tree, directory, name)?.let {
-                try { DocumentsContract.deleteDocument(resolver, it.uri) } catch (_: Exception) { }
+                try { if (!DocumentsContract.deleteDocument(resolver, it.uri)) allDeleted = false } catch (_: Exception) { allDeleted = false }
             }
         }
+        if (allDeleted) try { DocumentsContract.deleteDocument(resolver, attachments.transactionUri) } catch (_: Exception) { }
+    }
+
+    /** Writes one original system-camera video under an attachment marker. Cache ownership remains with caller. */
+    fun saveVideoAttachment(
+        noteName: String,
+        cacheFile: File,
+        extension: String,
+        onProgress: (copiedBytes: Long) -> Boolean
+    ): VideoAttachment? {
+        if (!cacheFile.isFile || cacheFile.length() <= 0L) return null
+        val tree = savedVaultUri() ?: return null
+        val noteFolder = assetFolderName(noteName)
+        val relativeDirectory = "assets/$noteFolder"
+        val directory = findOrCreateDirectory(tree, listOf("assets", noteFolder)) ?: return null
+        val id = nextCaptureId(tree, directory) ?: return null
+        val name = "$id-v.$extension"
+        val marker = DocumentsContract.createDocument(resolver, directory, "text/plain", ".markbook-$id.txn") ?: return null
+        val markerPayload = VideoTransactionPolicy.markerPayload(name)
+        if (!VideoTransactionPolicy.mayCreateTemporary(markerPayload)) return null
+        val markerWritten = try {
+            resolver.openOutputStream(marker, "wt")?.use { output ->
+                output.write(markerPayload.toByteArray(StandardCharsets.UTF_8))
+                output.flush()
+            } != null
+        } catch (_: Exception) {
+            false
+        }
+        if (!markerWritten) {
+            try { DocumentsContract.deleteDocument(resolver, marker) } catch (_: Exception) { }
+            return null
+        }
+        val mimeType = if (extension.equals("3gp", ignoreCase = true)) "video/3gpp" else "video/mp4"
+        val temporary = DocumentsContract.createDocument(
+            resolver, directory, mimeType, ".markbook-${UUID.randomUUID()}.tmp"
+        ) ?: run {
+            try { DocumentsContract.deleteDocument(resolver, marker) } catch (_: Exception) { }
+            return null
+        }
+        var finalRenameAttempted = false
+        return try {
+            FileInputStream(cacheFile).use { input ->
+                resolver.openOutputStream(temporary, "wt")?.use { output ->
+                    val buffer = ByteArray(DEFAULT_SYNC_BUFFER_BYTES)
+                    var copied = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        copied += count
+                        if (!onProgress(copied)) throw VideoCopyCancelledException()
+                    }
+                    output.flush()
+                } ?: throw IllegalStateException("Unable to write video")
+            }
+            finalRenameAttempted = true
+            val committed = DocumentsContract.renameDocument(resolver, temporary, name)
+                ?: throw IllegalStateException("Unable to commit video")
+            VideoAttachment(name, relativeDirectory, marker)
+        } catch (_: VideoCopyCancelledException) {
+            cleanupVideoTransactionBeforeFinalRename(tree, directory, name, temporary, marker, finalRenameAttempted)
+            null
+        } catch (_: Exception) {
+            cleanupVideoTransactionBeforeFinalRename(tree, directory, name, temporary, marker, finalRenameAttempted)
+            null
+        }
+    }
+
+    /** Returns false when marker cleanup could not complete and recovery must retain it. */
+    fun confirmVideoAttachment(attachment: VideoAttachment, cacheFile: File): Boolean {
+        if (cacheFile.exists() && !cacheFile.delete()) return false
+        return try { DocumentsContract.deleteDocument(resolver, attachment.transactionUri) } catch (_: Exception) { false }
+    }
+
+    fun noteReferencesPendingVideo(note: VaultDocument, session: PendingVideoCaptureSession): Boolean {
+        val attachment = session.attachmentVaultPath ?: return false
+        val relativePath = VaultRelativePath.attachmentPath(note.parentRelativePath, attachment)
+        val content = readText(note) ?: return false
+        return PendingVideoLinkPolicy.isReferenced(content, relativePath)
+    }
+
+    /** Returns true once a saved link is found, even when best-effort cleanup must retry later. */
+    fun cleanupPendingVideoCaptureIfCommitted(note: VaultDocument, session: PendingVideoCaptureSession): Boolean {
+        if (!noteReferencesPendingVideo(note, session)) return false
+        val tree = savedVaultUri() ?: return true
+        cleanupCompletedPendingVideoCapture(tree, session)
+        return true
+    }
+
+    private fun cleanupVideoTransactionBeforeFinalRename(
+        tree: Uri,
+        directory: Uri,
+        finalName: String,
+        temporary: Uri,
+        marker: Uri,
+        finalRenameAttempted: Boolean
+    ) {
+        val finalConfirmedAbsent = !finalRenameAttempted &&
+            runCatching { findChildStrict(tree, directory, finalName) == null }.getOrDefault(false)
+        val temporaryName = documentName(temporary)
+        val temporaryDeleteSucceeded = try { DocumentsContract.deleteDocument(resolver, temporary) } catch (_: Exception) { false }
+        val temporaryConfirmedAbsent = temporaryName != null && temporaryDeleteSucceeded &&
+            runCatching { findChildStrict(tree, directory, temporaryName) == null }.getOrDefault(false)
+        if (VideoTransactionPolicy.mayDeleteMarkerAfterFailure(
+                finalRenameAttempted, finalConfirmedAbsent, temporaryConfirmedAbsent
+            )
+        ) {
+            try { DocumentsContract.deleteDocument(resolver, marker) } catch (_: Exception) { }
+        }
+    }
+
+    private fun recoverPendingVideoCapture(tree: Uri) {
+        val session = pendingVideoCapture() ?: return
+        val note = findByRelativePath(tree, session.noteRelativePath) ?: return
+        val cacheExists = File(session.cachePath).isFile
+        when (PendingVideoCaptureRecoveryPolicy.action(
+            session.stage,
+            session.attachmentVaultPath != null,
+            noteReferencesPendingVideo(note, session),
+            cacheExists
+        )) {
+            PendingVideoRecoveryAction.CLEANUP_ONLY -> cleanupPendingVideoCaptureIfCommitted(note, session)
+            PendingVideoRecoveryAction.SHOW_CONFIRMATION, PendingVideoRecoveryAction.WAIT -> Unit
+        }
+    }
+
+    /** A recovered saved link owns the result; cleanup must not recreate UI or save it again. */
+    private fun cleanupCompletedPendingVideoCapture(tree: Uri, session: PendingVideoCaptureSession) {
+        val vaultPath = session.attachmentVaultPath ?: return
+        val slash = vaultPath.lastIndexOf('/')
+        if (slash <= 0) return
+        val directory = findByRelativePath(tree, vaultPath.substring(0, slash))?.uri ?: return
+        val videoName = vaultPath.substring(slash + 1)
+        val captureId = videoName.substringBeforeLast("-v.", missingDelimiterValue = "")
+        if (captureId.isBlank()) return
+        val marker = findChild(tree, directory, ".markbook-$captureId.txn")
+        val markerClean = marker == null || try { DocumentsContract.deleteDocument(resolver, marker.uri) } catch (_: Exception) { false }
+        val cache = File(session.cachePath)
+        val cacheClean = !cache.exists() || cache.delete()
+        if (markerClean && cacheClean) clearPendingVideoCapture()
     }
 
     fun openRelativeAttachment(relativePath: String): InputStream? {
@@ -581,10 +765,12 @@ class VaultRepository(private val context: Context) {
         val parts = normalizeRelativePath(relativePath).split('/').filter { it.isNotEmpty() }
         if (parts.isEmpty()) return null
         var parent = rootDocument(tree)
+        var parentRelativePath = ""
         var current: VaultDocument? = null
         for (part in parts) {
-            current = findChild(tree, parent, part) ?: return null
+            current = findChild(tree, parent, part, parentRelativePath) ?: return null
             parent = current.uri
+            parentRelativePath = current.relativePath
         }
         return current
     }
@@ -767,7 +953,7 @@ class VaultRepository(private val context: Context) {
     private fun joinRelativePath(parent: String, name: String): String =
         listOf(parent, name).filter { it.isNotEmpty() }.joinToString("/")
 
-    private fun nextPhotoId(tree: Uri, directory: Uri, extension: String): String? {
+    private fun nextCaptureId(tree: Uri, directory: Uri): String? {
         val timestamp = SimpleDateFormat("HHmmss", Locale.US).format(Date())
         repeat(MAX_PHOTO_NAME_ATTEMPTS) {
             val suffix = buildString(PHOTO_RANDOM_LENGTH) {
@@ -776,9 +962,8 @@ class VaultRepository(private val context: Context) {
                 }
             }
             val id = "$timestamp-$suffix"
-            val originalExists = findChild(tree, directory, "$id-o.$extension") != null
-            val correctedExists = findChild(tree, directory, "$id-c.$extension") != null
-            if (!originalExists && !correctedExists) return id
+            val names = listChildren(tree, directory).map { it.name }
+            if (!VideoCapturePolicy.captureIdCollides(names, id)) return id
         }
         return null
     }
@@ -867,18 +1052,22 @@ class VaultRepository(private val context: Context) {
                     }
                 } catch (_: Exception) { }
             }
-            RecoveryArtifact.ResolvePhotoTransaction -> {
+            RecoveryArtifact.ResolveAttachmentTransaction -> {
                 val names = readText(document)?.lines()?.filter { it.isNotBlank() }.orEmpty()
-                val committed = names.isNotEmpty() && attachmentReferencedByAnyNote(tree, names)
+                val referenceState = if (names.isEmpty()) AttachmentReferenceScan.UNREADABLE else attachmentReferenceState(tree, names)
                 try {
-                    if (!committed) {
+                    when (AttachmentRecoveryPolicy.action(names.isNotEmpty(), referenceState)) {
+                        AttachmentRecoveryAction.DELETE_FILES_AND_MARKER -> {
                         names.forEach { name ->
                             findChild(tree, directory, name)?.let {
                                 DocumentsContract.deleteDocument(resolver, it.uri)
                             }
                         }
+                        DocumentsContract.deleteDocument(resolver, document.uri)
+                        }
+                        AttachmentRecoveryAction.DELETE_MARKER_ONLY -> DocumentsContract.deleteDocument(resolver, document.uri)
+                        AttachmentRecoveryAction.KEEP_MARKER_AND_FILES -> Unit
                     }
-                    DocumentsContract.deleteDocument(resolver, document.uri)
                 } catch (_: Exception) { }
             }
         }
@@ -887,28 +1076,33 @@ class VaultRepository(private val context: Context) {
     private fun isAttachmentDirectory(relativeDirectory: String): Boolean =
         relativeDirectory.substringBefore('/') in setOf("assets", "attachments")
 
-    private fun attachmentReferencedByAnyNote(tree: Uri, names: List<String>): Boolean =
-        directoryReferencesAny(tree, rootDocument(tree), "", names)
+    private fun attachmentReferenceState(tree: Uri, names: List<String>): AttachmentReferenceScan =
+        directoryReferenceState(tree, rootDocument(tree), "", names)
 
-    private fun directoryReferencesAny(
+    private fun directoryReferenceState(
         tree: Uri,
         directory: Uri,
         relativeDirectory: String,
         names: List<String>
-    ): Boolean {
+    ): AttachmentReferenceScan {
         for (document in listChildrenStrict(tree, directory)) {
             if (document.mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
                 val childPath = listOf(relativeDirectory, document.name)
                     .filter { it.isNotEmpty() }
                     .joinToString("/")
-                if (childPath.substringBefore('/') !in NOTE_SCAN_EXCLUDED_DIRECTORIES &&
-                    directoryReferencesAny(tree, document.uri, childPath, names)) return true
+                if (childPath.substringBefore('/') !in NOTE_SCAN_EXCLUDED_DIRECTORIES) {
+                    when (directoryReferenceState(tree, document.uri, childPath, names)) {
+                        AttachmentReferenceScan.REFERENCED -> return AttachmentReferenceScan.REFERENCED
+                        AttachmentReferenceScan.UNREADABLE -> return AttachmentReferenceScan.UNREADABLE
+                        AttachmentReferenceScan.UNREFERENCED -> Unit
+                    }
+                }
             } else if (document.name.endsWith(".md", ignoreCase = true)) {
-                val content = readText(document).orEmpty()
-                if (names.any(content::contains)) return true
+                val content = readText(document) ?: return AttachmentReferenceScan.UNREADABLE
+                if (names.any(content::contains)) return AttachmentReferenceScan.REFERENCED
             }
         }
-        return false
+        return AttachmentReferenceScan.UNREFERENCED
     }
 
     private fun rootDocument(tree: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(
@@ -928,11 +1122,21 @@ class VaultRepository(private val context: Context) {
         return cleaned.ifEmpty { "Untitled" }
     }
 
+    private class VideoCopyCancelledException : Exception()
+
     companion object {
         private const val VAULT_URI_KEY = "vault_uri"
         private const val APPEARANCE_MODE_KEY = "appearance_mode"
         private const val DAILY_NOTE_DIRECTORY_KEY = "daily_note_directory"
         private const val DAILY_DIRECTORY_RESET_NOTICE_KEY = "daily_note_directory_reset_notice"
+        private const val PENDING_VIDEO_NOTE_URI = "pending_video_note_uri"
+        private const val PENDING_VIDEO_NOTE_PATH = "pending_video_note_path"
+        private const val PENDING_VIDEO_HASH = "pending_video_hash"
+        private const val PENDING_VIDEO_CARET = "pending_video_caret"
+        private const val PENDING_VIDEO_SCROLL = "pending_video_scroll"
+        private const val PENDING_VIDEO_CACHE = "pending_video_cache"
+        private const val PENDING_VIDEO_STAGE = "pending_video_stage"
+        private const val PENDING_VIDEO_ATTACHMENT_PATH = "pending_video_attachment_path"
         private const val DEFAULT_DAILY_NOTE_DIRECTORY = "Daily Notes"
         const val APPEARANCE_DAY = "day"
         const val APPEARANCE_NIGHT = "night"

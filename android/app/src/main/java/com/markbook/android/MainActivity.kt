@@ -1,22 +1,25 @@
 package com.markbook.android
 
-import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -31,12 +34,14 @@ import android.widget.Toast
 import com.google.android.gms.common.api.ApiException
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.ceil
 
 class MainActivity : Activity() {
     private lateinit var repository: VaultRepository
@@ -61,6 +66,8 @@ class MainActivity : Activity() {
     private var browserLoadGeneration = 0L
     private var browserMutationPending = false
     private var browserMutationMessage: String? = null
+    private var openSwipeRow: SwipeActionRow? = null
+    private var swipeDismissTouch: SwipeDismissTouchPolicy.State? = null
     private var dailyFolderDirectory: VaultDocument? = null
     private val dailyFolderPath = mutableListOf<String>()
     private val dailyFolderHistory = mutableListOf<VaultDocument>()
@@ -81,6 +88,12 @@ class MainActivity : Activity() {
     private var photoSavePending = false
     private var photoContextContent: String? = null
     private var photoContextScrollY = 0
+    private var pendingVideoSession: PendingVideoCaptureSession? = null
+    private var videoMetadata: VideoCapturePolicy.Metadata? = null
+    private var videoStatusView: TextView? = null
+    private var videoInsertAction: TextView? = null
+    private var videoCopyCancelled = AtomicBoolean(false)
+    private var videoInsertPending = false
     private var pendingEditorScrollY: Int? = null
     private var pendingCaretImagePath: String? = null
     private var screen = Screen.WELCOME
@@ -138,9 +151,11 @@ class MainActivity : Activity() {
             Screen.EDITOR -> returnToBrowser()
             Screen.EDITOR_LOADING, Screen.EDITOR_ERROR -> showVaultBrowser()
             Screen.BROWSER -> {
+                if (closeOpenSwipeRow()) return
                 if (browserPath.isNotEmpty()) showParentDirectory() else super.onBackPressed()
             }
             Screen.PHOTO -> restoreEditorScreen()
+            Screen.VIDEO -> cancelVideoCapture()
             Screen.SETTINGS -> showVaultBrowser()
             Screen.DAILY_FOLDER_PICKER -> showSettings()
             Screen.DRIVE_SETUP, Screen.DRIVE_RESULT -> showSettings()
@@ -148,6 +163,44 @@ class MainActivity : Activity() {
             Screen.DRIVE_PROGRESS -> showSettings()
             Screen.WELCOME -> super.onBackPressed()
         }
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (screen == Screen.BROWSER) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                openSwipeRow?.let { row ->
+                    if (!row.containsRawPoint(event.rawX, event.rawY)) {
+                        closeOpenSwipeRow()
+                        swipeDismissTouch = SwipeDismissTouchPolicy.begin(event.rawX, event.rawY)
+                    }
+                }
+            }
+            if (event.actionMasked == MotionEvent.ACTION_MOVE) {
+                swipeDismissTouch?.let {
+                    swipeDismissTouch = SwipeDismissTouchPolicy.onMove(
+                        it,
+                        event.rawX,
+                        event.rawY,
+                        ViewConfiguration.get(this).scaledTouchSlop.toFloat()
+                    )
+                }
+            }
+        }
+        if (
+            (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) &&
+            SwipeDismissTouchPolicy.shouldCancelTargetOnFinish(swipeDismissTouch)
+        ) {
+            val cancelEvent = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+            super.dispatchTouchEvent(cancelEvent)
+            cancelEvent.recycle()
+            swipeDismissTouch = null
+            return true
+        }
+        val dispatched = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            swipeDismissTouch = null
+        }
+        return dispatched
     }
 
     private fun recoverVaultAndOpenBrowser() {
@@ -228,6 +281,8 @@ class MainActivity : Activity() {
     }
 
     private fun showVaultBrowser(resetToRoot: Boolean = false) {
+        closeOpenSwipeRow(animated = false)
+        swipeDismissTouch = null
         if (resetToRoot) {
             browserDirectory = null
             browserPath.clear()
@@ -327,9 +382,8 @@ class MainActivity : Activity() {
                 content.addView(emptyState("当前目录没有文件夹"), matchWrap().apply { bottomMargin = dp(16) })
             } else {
                 folders.forEach { folder ->
-                    content.addView(vaultRow(
-                        "▸", folder.name, "文件夹", trailingLabel = "更多",
-                        trailingAction = { showDocumentMenu(folder) }
+                    content.addView(swipeableVaultRow(
+                        "▸", folder.name, "文件夹", folder
                     ) { openDirectory(folder) }, matchWrap().apply {
                         bottomMargin = dp(8)
                     })
@@ -341,12 +395,11 @@ class MainActivity : Activity() {
             } else {
                 notes.forEach { note ->
                     content.addView(
-                        vaultRow(
+                        swipeableVaultRow(
                             "•",
                             note.name.removeSuffix(".md"),
                             previews[note.uri.toString()] ?: "空白笔记",
-                            trailingLabel = "更多",
-                            trailingAction = { showDocumentMenu(note) }
+                            note
                         ) { openNote(note) },
                         matchWrap().apply { bottomMargin = dp(8) }
                     )
@@ -1373,7 +1426,7 @@ class MainActivity : Activity() {
                                 showVaultBrowser()
                             }
                             is VaultMutationResult.Failure -> {
-                                browserMutationMessage = "移动未完成，源文件未改动。请从“更多”重试，或重新选择 Vault。\n${mutationFailureMessage(result)}"
+                                browserMutationMessage = "移动未完成，源文件未改动。请左滑该条目后重试，或长按打开操作菜单。\n${mutationFailureMessage(result)}"
                                 showVaultBrowser()
                             }
                         }
@@ -1440,7 +1493,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             maxLines = 1
         }, LinearLayout.LayoutParams(0, dp(44), 1f))
-        toolbar.addView(action("拍照", false) { startCamera() })
+        toolbar.addView(action("拍摄", false) { showCaptureChoices() })
         saveActionView = action("保存", true) { saveCurrentNote() }
         toolbar.addView(saveActionView)
         root.addView(toolbar, matchWrap())
@@ -1475,6 +1528,26 @@ class MainActivity : Activity() {
         setContentView(root)
         editor.loadDataWithBaseURL(null, renderNote(content), "text/html", "UTF-8", null)
         updateSaveStatus()
+        restorePendingVideoConfirmation(note)
+    }
+
+    private fun restorePendingVideoConfirmation(note: VaultDocument) {
+        val session = repository.pendingVideoCapture() ?: return
+        if (session.noteUri != note.uri.toString()) return
+        if (repository.cleanupPendingVideoCaptureIfCommitted(note, session)) return
+        if (session.stage == VIDEO_STAGE_LAUNCHED) return
+        val cache = File(session.cachePath)
+        if (!cache.isFile || cache.length() == 0L) return
+        handler.post {
+            if (screen != Screen.EDITOR || currentNote?.uri != note.uri) return@post
+            val metadata = readVideoMetadata(cache, null)
+            val validation = VideoCapturePolicy.validate(metadata) as? VideoCapturePolicy.Validation.Accepted ?: return@post
+            captureFile = cache
+            pendingVideoSession = session.copy(stage = VIDEO_STAGE_CONFIRMING)
+            repository.savePendingVideoCapture(pendingVideoSession!!)
+            videoMetadata = metadata
+            showVideoConfirm(validation.extension)
+        }
     }
 
     private fun renderNote(content: String): String =
@@ -1664,7 +1737,17 @@ class MainActivity : Activity() {
         saveActionView?.alpha = if (saveCoordinator.hasInFlightSave) 0.55f else 1f
     }
 
-    private fun startCamera() {
+    private fun showCaptureChoices() {
+        if (photoSavePending || videoInsertPending) return
+        AlertDialog.Builder(this)
+            .setTitle("拍摄")
+            .setItems(arrayOf("拍照", "录视频")) { _, index ->
+                if (index == 0) startPhotoCapture() else startVideoCapture()
+            }
+            .show()
+    }
+
+    private fun startPhotoCapture() {
         if (currentNote == null) {
             toast("请先打开一篇笔记")
             return
@@ -1694,10 +1777,6 @@ class MainActivity : Activity() {
     }
 
     private fun launchCamera() {
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
-            return
-        }
         val directory = File(cacheDir, "camera").apply { mkdirs() }
         captureFile = File(directory, "capture-${UUID.randomUUID()}.jpg")
         captureUri = Uri.parse("content://$FILE_PROVIDER_AUTHORITY/capture/${captureFile!!.name}")
@@ -1707,7 +1786,7 @@ class MainActivity : Activity() {
             clipData = android.content.ClipData.newRawUri("photo", captureUri)
         }
         try {
-            startActivityForResult(intent, CAMERA_REQUEST)
+            startActivityForResult(intent, PHOTO_CAMERA_REQUEST)
         } catch (_: Exception) {
             toast("系统相机不可用")
         }
@@ -1716,8 +1795,9 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == CAMERA_REQUEST && resultCode != RESULT_OK) {
+        if ((requestCode == PHOTO_CAMERA_REQUEST || requestCode == VIDEO_CAMERA_REQUEST) && resultCode != RESULT_OK) {
             discardCaptureFile()
+            if (requestCode == VIDEO_CAMERA_REQUEST) repository.clearPendingVideoCapture()
             return
         }
         if (resultCode != RESULT_OK) return
@@ -1743,7 +1823,11 @@ class MainActivity : Activity() {
             }
             return
         }
-        if (requestCode == CAMERA_REQUEST) {
+        if (requestCode == VIDEO_CAMERA_REQUEST) {
+            handleVideoCameraResult(data)
+            return
+        }
+        if (requestCode == PHOTO_CAMERA_REQUEST) {
             val bitmap = captureFile?.let { decodeCapturePreview(it) }
             if (bitmap == null) {
                 toast("无法读取照片")
@@ -1767,13 +1851,253 @@ class MainActivity : Activity() {
         })
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == CAMERA_PERMISSION_REQUEST && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            launchCamera()
-        } else if (requestCode == CAMERA_PERMISSION_REQUEST) {
-            toast("需要相机权限才能拍照")
+    private fun startVideoCapture() {
+        val note = currentNote ?: run {
+            toast("请先打开一篇笔记")
+            return
         }
+        saveCurrentNote { saved ->
+            if (!saved) {
+                toast("请先保存笔记，再录视频")
+                return@saveCurrentNote
+            }
+            capturePhotoContext {
+                val markerOffset = photoContextContent?.indexOf(MarkdownCodec.CARET_MARKER)?.coerceAtLeast(0) ?: 0
+                noteIoExecutor.execute {
+                    val persisted = repository.readText(note) ?: return@execute
+                    val session = PendingVideoCaptureSession(
+                        note.uri.toString(), note.relativePath, VideoCapturePolicy.sha256(persisted),
+                        markerOffset.coerceIn(0, persisted.length), photoContextScrollY, "", VIDEO_STAGE_PREPARING
+                    )
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed && currentNote?.uri == note.uri) launchVideoCamera(session)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun launchVideoCamera(prepared: PendingVideoCaptureSession? = repository.pendingVideoCapture()) {
+        val session = prepared ?: return
+        val directory = File(cacheDir, "camera").apply { mkdirs() }
+        val output = File(directory, "capture-${UUID.randomUUID()}.mp4")
+        val uri = Uri.parse("content://$FILE_PROVIDER_AUTHORITY/capture/${output.name}")
+        captureFile = output
+        captureUri = uri
+        pendingVideoSession = session.copy(cachePath = output.absolutePath, stage = VIDEO_STAGE_LAUNCHED)
+        repository.savePendingVideoCapture(pendingVideoSession!!)
+        val intent = Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE).apply {
+            putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri)
+            putExtra(android.provider.MediaStore.EXTRA_DURATION_LIMIT, VIDEO_DURATION_LIMIT_SECONDS)
+            putExtra(android.provider.MediaStore.EXTRA_SIZE_LIMIT, VideoCapturePolicy.MAX_SIZE_BYTES)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = android.content.ClipData.newRawUri("video", uri)
+        }
+        try {
+            startActivityForResult(intent, VIDEO_CAMERA_REQUEST)
+        } catch (_: Exception) {
+            discardCaptureFile()
+            repository.clearPendingVideoCapture()
+            toast("系统相机不可用")
+        }
+    }
+
+    private fun handleVideoCameraResult(data: Intent?) {
+        val session = repository.pendingVideoCapture() ?: return
+        val output = File(session.cachePath)
+        if ((!output.isFile || output.length() == 0L) && data?.data != null) {
+            if (!copyReturnedVideoUri(data.data!!, output)) {
+                discardCaptureFile()
+                repository.clearPendingVideoCapture()
+                toast("无法读取录制的视频")
+                return
+            }
+        }
+        val metadata = readVideoMetadata(output, data?.data)
+        when (val validation = VideoCapturePolicy.validate(metadata)) {
+            is VideoCapturePolicy.Validation.Rejected -> {
+                discardCaptureFile()
+                repository.clearPendingVideoCapture()
+                toast(validation.message)
+            }
+            is VideoCapturePolicy.Validation.Accepted -> {
+                captureFile = output
+                pendingVideoSession = session.copy(cachePath = output.absolutePath, stage = VIDEO_STAGE_CONFIRMING)
+                repository.savePendingVideoCapture(pendingVideoSession!!)
+                videoMetadata = metadata
+                showVideoConfirm(validation.extension)
+            }
+        }
+    }
+
+    private fun copyReturnedVideoUri(source: Uri, target: File): Boolean = try {
+        contentResolver.openInputStream(source)?.use { input ->
+            FileOutputStream(target).use { output ->
+                val buffer = ByteArray(32 * 1024)
+                var copied = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    copied += count
+                    if (copied > VideoCapturePolicy.MAX_SIZE_BYTES) return false
+                    output.write(buffer, 0, count)
+                }
+            }
+        } != null
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun readVideoMetadata(file: File, returnedUri: Uri?): VideoCapturePolicy.Metadata {
+        var duration = 0L
+        var hasVideo = false
+        try {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            } finally {
+                retriever.release()
+            }
+            val extractor = android.media.MediaExtractor()
+            try {
+                extractor.setDataSource(file.absolutePath)
+                hasVideo = (0 until extractor.trackCount).any { index ->
+                    extractor.getTrackFormat(index).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true
+                }
+            } finally {
+                extractor.release()
+            }
+        } catch (_: Exception) { }
+        val header = ByteArray(64)
+        val headerBytes = try {
+            FileInputStream(file).use { it.read(header).coerceAtLeast(0) }
+        } catch (_: Exception) {
+            0
+        }
+        return VideoCapturePolicy.Metadata(
+            file.length(), duration, returnedUri?.let(contentResolver::getType) ?: captureUri?.let(contentResolver::getType),
+            VideoCapturePolicy.sniffContainer(header.copyOf(headerBytes)), hasVideo
+        )
+    }
+
+    private fun showVideoConfirm(extension: String) {
+        releaseEditor()
+        screen = Screen.VIDEO
+        val metadata = videoMetadata ?: return
+        val root = pageRoot(COLOR_EDITOR_BACKGROUND)
+        val header = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(6))
+            addView(action("取消", false) { if (!videoInsertPending) cancelVideoCapture() })
+            addView(TextView(this@MainActivity).apply {
+                text = "确认视频"
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_PRIMARY_TEXT)
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            videoInsertAction = action("插入视频", true) { commitVideo(extension) }
+            addView(videoInsertAction)
+        }
+        videoStatusView = TextView(this).apply {
+            text = "大小 ${formatBytes(metadata.sizeBytes)} · 时长 ${VideoCapturePolicy.formatDuration(metadata.durationMs)}"
+            textSize = 15f
+            setTextColor(COLOR_SECONDARY_TEXT)
+            setPadding(dp(20), dp(28), dp(20), dp(16))
+        }
+        root.addView(header, matchWrap())
+        root.addView(videoStatusView, matchWrap())
+        root.addView(action("重新录制", false) { if (!videoInsertPending) { discardCaptureFile(); launchVideoCamera(pendingVideoSession) } },
+            matchWrap().apply { leftMargin = dp(20); rightMargin = dp(20) })
+        setContentView(root)
+    }
+
+    private fun commitVideo(extension: String) {
+        val note = currentNote ?: return
+        val session = pendingVideoSession ?: return
+        val cache = File(session.cachePath)
+        if (videoInsertPending || !cache.isFile) return
+        videoInsertPending = true
+        videoCopyCancelled.set(false)
+        videoInsertAction?.isEnabled = false
+        videoStatusView?.text = "正在复制视频…"
+        repository.savePendingVideoCapture(session.copy(stage = VIDEO_STAGE_COPYING))
+        noteIoExecutor.execute {
+            val attachment = repository.saveVideoAttachment(note.name, cache, extension) { copied ->
+                runOnUiThread { videoStatusView?.text = "正在复制视频… ${formatBytes(copied)}（取消可返回）" }
+                !videoCopyCancelled.get()
+            }
+            if (attachment == null) {
+                runOnUiThread { showVideoFailure("视频尚未插入；缓存已保留，可重试或取消") }
+                return@execute
+            }
+            val current = repository.readText(note)
+            if (current == null || VideoCapturePolicy.sha256(current) != session.contentSha256) {
+                runOnUiThread { showVideoFailure("笔记已在外部修改，未覆盖正文；视频缓存已保留") }
+                return@execute
+            }
+            val relativePath = repository.relativeAttachmentPath(note, attachment)
+            val attachmentSession = session.copy(
+                stage = VIDEO_STAGE_ATTACHMENT_WRITTEN,
+                attachmentVaultPath = "${attachment.relativeDirectory}/${attachment.name}"
+            )
+            repository.savePendingVideoCapture(attachmentSession)
+            val content = insertVideoAtOffset(current, session.caretOffset, VideoCapturePolicy.videoLink(relativePath, videoMetadata?.durationMs ?: 0L))
+            if (!repository.saveText(note, content)) {
+                runOnUiThread { showVideoFailure("无法更新笔记，视频缓存已保留，可重试") }
+                return@execute
+            }
+            repository.savePendingVideoCapture(attachmentSession.copy(stage = VIDEO_STAGE_NOTE_SAVED))
+            val refreshed = repository.refreshDocument(note) ?: note
+            val cleaned = repository.confirmVideoAttachment(attachment, cache)
+            if (cleaned) repository.clearPendingVideoCapture()
+            runOnUiThread {
+                currentNote = refreshed
+                pendingEditorScrollY = session.scrollY
+                pendingVideoSession = null
+                videoMetadata = null
+                videoStatusView = null
+                videoInsertAction = null
+                videoInsertPending = false
+                captureFile = null
+                captureUri = null
+                showEditor(refreshed, content)
+                statusView?.text = if (cleaned) "视频已插入并保存" else "视频已保存；清理将在下次启动继续"
+            }
+        }
+    }
+
+    private fun insertVideoAtOffset(content: String, offset: Int, link: String): String {
+        val point = offset.coerceIn(0, content.length)
+        return content.substring(0, point) + "\n\n$link\n\n" + content.substring(point)
+    }
+
+    private fun cancelVideoCapture() {
+        videoCopyCancelled.set(true)
+        if (!videoInsertPending) {
+            discardCaptureFile()
+            repository.clearPendingVideoCapture()
+            pendingVideoSession = null
+            videoMetadata = null
+            val note = currentNote
+            if (note != null) {
+                pendingEditorScrollY = photoContextScrollY
+                openNote(note)
+            } else showVaultBrowser()
+        }
+    }
+
+    private fun showVideoFailure(message: String) {
+        videoInsertPending = false
+        videoInsertAction?.isEnabled = true
+        videoStatusView?.text = message
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024L -> String.format(Locale.ROOT, "%.1f MiB", bytes / (1024.0 * 1024.0))
+        bytes >= 1024L -> String.format(Locale.ROOT, "%.1f KiB", bytes / 1024.0)
+        else -> "$bytes B"
     }
 
     private fun showPhotoEditor(bitmap: Bitmap) {
@@ -1972,6 +2296,13 @@ class MainActivity : Activity() {
             }
             return WebResourceResponse(mime, null, stream)
         }
+
+        override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+            val uri = request?.url ?: return false
+            if (uri.scheme == "http" || uri.scheme == "https") return false
+            openAttachmentInSystemPlayer(Uri.decode(uri.toString()))
+            return true
+        }
     }
 
     private inner class EditorBridge {
@@ -1984,6 +2315,38 @@ class MainActivity : Activity() {
                 handler.removeCallbacks(autosave)
                 handler.postDelayed(autosave, AUTOSAVE_DELAY_MS)
             }
+        }
+
+        @JavascriptInterface
+        fun openAttachment(relativePath: String) {
+            handler.post { openAttachmentInSystemPlayer(relativePath) }
+        }
+    }
+
+    private fun openAttachmentInSystemPlayer(relativePath: String) {
+        if (!relativePath.lowercase(Locale.ROOT).endsWith(".mp4") && !relativePath.lowercase(Locale.ROOT).endsWith(".3gp")) return
+        val suffix = relativePath.substringAfterLast('.', "mp4")
+        val name = "play-${UUID.randomUUID()}.$suffix"
+        val target = File(File(cacheDir, "camera").apply { mkdirs() }, name)
+        val copied = try {
+            repository.openRelativeAttachment(relativePath)?.use { input ->
+                FileOutputStream(target).use { input.copyTo(it) }
+            } != null
+        } catch (_: Exception) { false }
+        if (!copied) {
+            toast("无法打开视频")
+            return
+        }
+        val uri = Uri.parse("content://$FILE_PROVIDER_AUTHORITY/capture/$name")
+        val mime = if (name.endsWith(".3gp", true)) "video/3gpp" else "video/mp4"
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = android.content.ClipData.newRawUri("video", uri)
+            })
+        } catch (_: Exception) {
+            toast("系统播放器不可用")
         }
     }
 
@@ -2080,6 +2443,101 @@ class MainActivity : Activity() {
         } else {
             addView(action(trailingLabel, false, trailingAction), LinearLayout.LayoutParams(dp(56), dp(44)))
         }
+    }
+
+    private fun swipeableVaultRow(
+        icon: String,
+        title: String,
+        subtitle: String,
+        document: VaultDocument,
+        activate: () -> Unit
+    ): View {
+        val actionsWidth = swipeActionWidthPx() * 2
+        val row = SwipeActionRow(
+            this,
+            actionsWidth,
+            ViewConfiguration.get(this).scaledTouchSlop
+        )
+        val actionStrip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(swipeAction("重命名", color = COLOR_RENAME_ACTION) {
+                row.close(animated = false)
+                showRenameDialog(document)
+            }, LinearLayout.LayoutParams(0, -1, 1f))
+            addView(swipeAction("删除", "删除，移到回收站", COLOR_TRASH_ACTION) {
+                row.close(animated = false)
+                confirmMoveToTrash(document)
+            }, LinearLayout.LayoutParams(0, -1, 1f))
+        }
+        val foreground = vaultRow(icon, title, subtitle, action = activate)
+        row.bind(
+            foreground = foreground,
+            actionStrip = actionStrip,
+            title = title,
+            onActivate = {
+                if (!consumeSwipeDismissActivation()) activate()
+            },
+            onLongPress = { showDocumentMenu(document) },
+            onRename = { showRenameDialog(document) },
+            onMoveToTrash = { confirmMoveToTrash(document) },
+            onOpenStateChanged = { changedRow, isOpen ->
+                if (isOpen) {
+                    openSwipeRow?.takeIf { it !== changedRow }?.close(animated = false)
+                    openSwipeRow = changedRow
+                } else if (openSwipeRow === changedRow) {
+                    openSwipeRow = null
+                }
+            }
+        )
+        return row
+    }
+
+    private fun consumeSwipeDismissActivation(): Boolean {
+        val suppress = SwipeDismissTouchPolicy.suppressActivation(swipeDismissTouch)
+        if (suppress) swipeDismissTouch = null
+        return suppress
+    }
+
+    private fun swipeActionWidthPx(): Int {
+        val fontScale = resources.configuration.fontScale.coerceAtLeast(1f)
+        val scaledMinimum = dp(SWIPE_ACTION_WIDTH_DP) * fontScale
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = SWIPE_ACTION_TEXT_SP * resources.displayMetrics.scaledDensity
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val widestLabel = maxOf(textPaint.measureText("重命名"), textPaint.measureText("删除"))
+        val textWidth = widestLabel + dp(SWIPE_ACTION_HORIZONTAL_PADDING_DP * 2)
+        return ceil(maxOf(scaledMinimum, textWidth).toDouble()).toInt()
+    }
+
+    private fun swipeAction(
+        label: String,
+        accessibilityLabel: String = label,
+        color: Int,
+        onClick: () -> Unit
+    ): TextView = TextView(this).apply {
+        text = label
+        textSize = SWIPE_ACTION_TEXT_SP
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setSingleLine(true)
+        ellipsize = TextUtils.TruncateAt.END
+        minHeight = dp(44)
+        setPadding(dp(4), dp(8), dp(4), dp(8))
+        setTextColor(Color.WHITE)
+        background = rounded(color, 0)
+        isClickable = true
+        isFocusable = true
+        contentDescription = accessibilityLabel
+        setOnClickListener { onClick() }
+    }
+
+    private fun closeOpenSwipeRow(animated: Boolean = true): Boolean {
+        val row = openSwipeRow ?: return false
+        openSwipeRow = null
+        row.close(animated)
+        return true
     }
 
     private fun settingsRow(title: String, subtitle: String, selected: Boolean, action: () -> Unit): View = LinearLayout(this).apply {
@@ -2276,20 +2734,34 @@ class MainActivity : Activity() {
         get() = if (isNightTheme()) Color.rgb(158, 178, 166) else Color.rgb(102, 113, 107)
     private val COLOR_ON_ACCENT: Int
         get() = Color.WHITE
+    private val COLOR_RENAME_ACTION: Int
+        get() = if (isNightTheme()) Color.rgb(46, 94, 150) else Color.rgb(37, 105, 169)
+    private val COLOR_TRASH_ACTION: Int
+        get() = if (isNightTheme()) Color.rgb(190, 82, 74) else Color.rgb(176, 54, 47)
 
     private enum class Screen {
-        WELCOME, BROWSER, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, SETTINGS, DAILY_FOLDER_PICKER,
+        WELCOME, BROWSER, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, VIDEO, SETTINGS, DAILY_FOLDER_PICKER,
         DRIVE_SETUP, DRIVE_FOLDER_PICKER, DRIVE_CONFIRM, DRIVE_PROGRESS, DRIVE_RESULT
     }
 
     companion object {
-        private const val CAMERA_PERMISSION_REQUEST = 1001
         private const val VAULT_REQUEST = 1002
-        private const val CAMERA_REQUEST = 1003
+        private const val PHOTO_CAMERA_REQUEST = 1003
+        private const val VIDEO_CAMERA_REQUEST = 1005
         private const val DRIVE_SIGN_IN_REQUEST = 1004
         private const val FILE_PROVIDER_AUTHORITY = "com.markbook.android.fileprovider"
         private const val MAX_PREVIEW_SIDE = 2560
         private const val NOTE_PREVIEW_BYTES = 4096
         private const val AUTOSAVE_DELAY_MS = 600L
+        private const val SWIPE_ACTION_WIDTH_DP = 76
+        private const val SWIPE_ACTION_TEXT_SP = 14f
+        private const val SWIPE_ACTION_HORIZONTAL_PADDING_DP = 4
+        private const val VIDEO_DURATION_LIMIT_SECONDS = 180
+        private const val VIDEO_STAGE_PREPARING = "preparing"
+        private const val VIDEO_STAGE_LAUNCHED = "launched"
+        private const val VIDEO_STAGE_CONFIRMING = "confirming"
+        private const val VIDEO_STAGE_COPYING = "copying"
+        private const val VIDEO_STAGE_ATTACHMENT_WRITTEN = "attachment_written"
+        private const val VIDEO_STAGE_NOTE_SAVED = "note_saved"
     }
 }

@@ -22,3 +22,6 @@ Android 端使用系统相机 Intent/Activity Result，HarmonyOS 端使用
 4. 在当前选区插入相对链接并原子保存笔记。
 5. 删除事务标记并更新预览；保存失败则回滚附件和正文。
 6. 应用启动时扫描未完成标记：已被 Markdown 引用的附件保留，未引用附件删除。
+7. 视频使用 `ACTION_VIDEO_CAPTURE`，持久化不含正文的待处理会话；确认后流式复制，校验
+   大小、时长、容器签名字节/MIME 和 video 轨，在 hash 校验未外变的正文原光标处写入普通链接；
+   final rename 结果不确定时保留 marker，已保存链接的 pending 会话只清理不重放。

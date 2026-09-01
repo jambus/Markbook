@@ -11,6 +11,7 @@ source of truth; neither client creates a second Vault or a required database.
 ├── Daily Notes/<yyyy-MM-dd>.md
 ├── assets/<note-file-stem>/<HHmmss>-<xxxx>-o.<ext>
 ├── assets/<note-file-stem>/<HHmmss>-<xxxx>-c.<ext>
+├── assets/<note-file-stem>/<HHmmss>-<xxxx>-v.{mp4|3gp}
 ├── attachments/                         # legacy, read-only compatibility
 ├── .trash/                              # local-only deleted notes
 └── .markbook/
@@ -27,6 +28,12 @@ base-36 random suffix. The client checks both target names before creating
 either file and retries on a collision.
 Existing UUID-based names, including `photo-<uuid>.<ext>`, remain readable for
 backward compatibility under the legacy `attachments/` directory.
+
+New videos are original system-camera files, stored without transcoding as
+`<HHmmss>-<xxxx>-v.mp4` or `.3gp`. The capture-ID collision check is shared by
+photo and video suffixes (`-o`, `-c`, `-v`). A video reference is ordinary
+Markdown: `[视频 HH:mm:ss](<relative POSIX path>)`; angle brackets are required
+when the relative path contains spaces.
 
 ## User-managed files and folders
 
@@ -74,6 +81,22 @@ Temporary files and transaction markers are prefixed with `.markbook-` and must
 be removed or resolved on startup. A completed note or attachment transaction
 must not be deleted merely because cleanup was interrupted. An unreferenced
 incomplete attachment transaction may be removed after its marker is examined.
+
+For every attachment type, the marker is created and its final attachment name is written and
+flushed before any temporary output is created. The writer creates the final attachment(s),
+re-reads and hashes the note before insertion to prevent overwriting an
+externally changed note, records the final attachment identity and commit stage, saves the note,
+then deletes marker and cache. If any
+cleanup delete fails, the marker remains. Recovery may remove an unreferenced
+incomplete attachment only after every Markdown file that could be scanned was
+read successfully; if any Markdown file is unreadable, it must keep the marker
+and attachment rather than infer it is unreferenced. Pending external capture
+state may persist only note identity/path, note-content SHA-256, caret/scroll,
+cache path, final attachment identity and phase—never a private copy of the Markdown body.
+After a saved Markdown link is detected, recovery only cleans marker/cache/pending state; it never
+replays the insertion. A provider result that returns null or throws after final rename is treated
+as unknown and keeps its marker. MP4/3GP acceptance requires a recognized container signature plus
+a video track; an output filename or Provider MIME alone is insufficient.
 
 Deletes move notes into `.trash/`; this directory is excluded from remote sync.
 Permanent deletion is a separate explicit operation. Attachments are retained until a later

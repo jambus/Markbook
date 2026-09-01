@@ -3,7 +3,7 @@
 ## Technical Context
 
 - Kotlin Android 工程位于 `android/`，使用项目内 Gradle Wrapper。
-- 当前开发版本为 `versionName 0.3.0`、`versionCode 4`；后续候选版本按
+- 当前开发版本为 `versionName 0.3.0`、`versionCode 6`；后续候选版本按
   [`docs/RELEASE_NOTES.md`](../../RELEASE_NOTES.md) 的规则提升并记录。
 - 通过 Storage Access Framework 选择 Vault 并持久化目录 URI 权限。
 - 通过 Activity Result API 拉起系统相机并复制返回内容。
@@ -27,6 +27,10 @@
     二次确认后逐项永久删除，附件保留，结果持续显示并允许失败项重试。
 12. 增加普通文件库管理：以独立命名策略校验新建/重命名，以 Provider 原子移动处理回收站，
     并用真实笔记位置计算附件路径与修复每日目录配置。
+13. 为主文件库普通条目增加原生左滑操作行：以可单测手势策略处理轴锁、阈值、钳制和甩动，
+    保留长按和辅助技术入口；左滑仅显示重命名或删除，删除仍复用既有确认与 Provider 移到回收站流程。
+14. 将编辑器拍照入口扩展为系统相机拍照/短视频选择；视频经确认页原样流式写入、hash
+    冲突检查和 marker 事务后，在原光标插入普通 Markdown 相对链接。
 
 ## Constitution Check
 

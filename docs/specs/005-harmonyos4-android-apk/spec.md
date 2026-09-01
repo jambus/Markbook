@@ -4,7 +4,7 @@
 **Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
 004-harmony-4-5-compatibility
-**Current Baseline**: Android APK `0.3.0` development (`versionCode 4`)
+**Current Baseline**: Android APK `0.3.0` development (`versionCode 6`)
 
 ## Goal
 
@@ -51,6 +51,11 @@ Mate 60 真机验收前，该版本不得标记为正式发布。
 用户可以在设置中查看当前 APK 的版本号，并明确知道中文已启用、English 尚未支持，
 不会误以为切换语言已生效。
 
+### US7 系统相机短视频（P1）
+
+用户在编辑器选择“录视频”，在系统相机完成不超过 180 秒的录制后，确认大小和时长，
+将原始 MP4/3GP 安全写入当前笔记附件目录并在原光标处插入相对 Markdown 链接。
+
 ## Functional Requirements
 
 - **FR-501** APK 必须在 Mate 60 HarmonyOS 4 上完成安装、启动和升级安装验证。
@@ -79,8 +84,19 @@ Mate 60 真机验收前，该版本不得标记为正式发布。
 - **FR-518** Android 文件库必须实现 `001` 的普通目录新建、文件夹新建、重命名与移到
   回收站；所有 I/O 在后台完成，过期结果不得更新当前 UI。创建、重命名和 Provider 改名
   必须反馈实际结果；普通笔记的附件路径使用真实父目录。
+- **FR-519** Android 主文件库的普通笔记和普通文件夹必须支持左滑显示“重命名”与“删除”
+  操作块；删除仍须确认后移到回收站，手势只展开操作，不得直接删除。每次最多展开一行，长按
+  菜单与 TalkBack 的“移到回收站”命名操作入口继续可用；每日目录和 Drive 选择器保持原有交互。
+- **FR-520** Android 编辑器必须将“拍照”替换为“拍摄”并显式选择拍照或系统相机录视频；
+  视频不使用媒体库选择、内嵌播放器、转码或剪辑，且不请求录音/媒体读取权限。
+- **FR-521** 视频 MVP 限制为 180 秒和 200 MiB，只接受非空、有 video 轨且 MIME/容器受支持的
+  MP4/3GP；原样保存为 `assets/<note-stem>/<HHmmss>-<xxxx>-v.{mp4|3gp}`，并在原位置插入
+  `[视频 HH:mm:ss](<relative path>)`。
+- **FR-522** 外部相机、确认、流式复制与正文插入必须可恢复：持久会话不复制正文但记录最终附件
+  与提交阶段，提交前 hash 检查外部变更；已保存链接恢复时只清理、不重复插入，无法扫描任一
+  Markdown 或 final rename 结果不确定时不得删除可能被引用的附件。
 
 ## Out of Scope
 
 - HarmonyOS 5/6 上继续使用 APK。
-- 首个 APK 里程碑交付 Google Drive、NAS、OCR、标注或视频处理。
+- 首个 APK 里程碑交付 Google Drive、NAS、OCR、标注、内嵌视频播放、转码或剪辑。

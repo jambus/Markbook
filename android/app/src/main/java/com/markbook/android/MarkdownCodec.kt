@@ -18,7 +18,7 @@ object MarkdownCodec {
     private val IMAGE_PATTERN: Pattern = Pattern.compile("!\\[([^]]*)]\\(([^)]+)\\)")
     private val BOLD_PATTERN = Regex("\\*\\*([^*]+)\\*\\*")
     private val ITALIC_PATTERN = Regex("\\*([^*]+)\\*")
-    private val LINK_PATTERN = Regex("\\[([^]]+)]\\(([^\\s)]+)\\)")
+    private val LINK_PATTERN = Regex("\\[([^]]+)]\\((?:<([^>]+)>|([^\\s)]+))\\)")
     private val ORDERED_ITEM = Regex("^\\d+[.)]\\s")
     private val TASK_ITEM = Regex("^[-*+]\\s+\\[[ xX]]")
     private val THEMATIC_BREAK = Regex("^(-{3,}|\\*{3,}|_{3,}|={3,})$")
@@ -29,6 +29,15 @@ object MarkdownCodec {
         attachmentUrl: (String) -> String,
         nightMode: Boolean = false
     ): String = document(renderBody(markdown, attachmentUrl), nightMode)
+
+    /** Mirrors the in-page anchor serializer for destinations that require Markdown angle brackets. */
+    fun serializeLink(label: String, destination: String): String =
+        "[$label](${serializeLinkDestination(destination)})"
+
+    fun serializeLinkDestination(destination: String): String =
+        if (destination.any { it.isWhitespace() || it == '(' || it == ')' || it == '<' || it == '>' }) {
+            "<$destination>"
+        } else destination
 
     /** Renders the editable body only. Exposed so round-trip behaviour can be unit tested. */
     fun renderBody(markdown: String, attachmentUrl: (String) -> String): String {
@@ -186,6 +195,9 @@ object MarkdownCodec {
               var RAW_OPEN = '\u0000raw', RAW_CLOSE = '\u0000';
               var rawBlocks = [];
               function text(node) { return (node.textContent || '').replace(/\u00a0/g,' '); }
+              function linkDestination(href) {
+                return /[\s()<>]/.test(href) ? '<' + href + '>' : href;
+              }
               function md(node) {
                 if (node.nodeType === Node.TEXT_NODE) return text(node);
                 if (node.nodeType !== Node.ELEMENT_NODE) return '';
@@ -206,7 +218,7 @@ object MarkdownCodec {
                 if (tag === 'ul' || tag === 'ol') return out;
                 if (tag === 'strong' || tag === 'b') return '**' + out + '**';
                 if (tag === 'em' || tag === 'i') return '*' + out + '*';
-                if (tag === 'a') return '[' + out + '](' + (node.getAttribute('href') || '') + ')';
+                if (tag === 'a') return '[' + out + '](' + linkDestination(node.getAttribute('href') || '') + ')';
                 if (tag === 'br') return '\n';
                 if (tag === 'p' || tag === 'div') return out.trim() + '\n';
                 return out;
@@ -303,6 +315,13 @@ object MarkdownCodec {
                 if (plain) document.execCommand('insertText', false, plain);
               });
               editor.addEventListener('input', function() { if (window.Android) Android.onChanged(); });
+              editor.addEventListener('click', function(event) {
+                var node = event.target;
+                if (!node || node.tagName.toLowerCase() !== 'a') return;
+                var href = node.getAttribute('href') || '';
+                if (/^https?:/i.test(href) || !window.Android || !window.Android.openAttachment) return;
+                event.preventDefault(); Android.openAttachment(href);
+              });
             })();
             </script></html>
         """.trimIndent()
@@ -313,7 +332,7 @@ object MarkdownCodec {
         val out = StringBuilder()
         var last = 0
         while (matcher.find()) {
-            out.append(emphasize(escapeHtml(value.substring(last, matcher.start()))))
+            out.append(inlineText(value.substring(last, matcher.start())))
             val alt = matcher.group(1).orEmpty()
             val path = matcher.group(2).orEmpty()
             out.append("<img alt=\"").append(escapeAttribute(alt))
@@ -321,17 +340,28 @@ object MarkdownCodec {
                 .append("\" src=\"").append(escapeAttribute(attachmentUrl(path))).append("\">")
             last = matcher.end()
         }
+        out.append(inlineText(value.substring(last)))
+        return out.toString()
+    }
+
+    /** Parses Markdown links before HTML escaping so `<path with spaces>` remains a link. */
+    private fun inlineText(value: String): String {
+        val out = StringBuilder()
+        var last = 0
+        for (match in LINK_PATTERN.findAll(value)) {
+            out.append(emphasize(escapeHtml(value.substring(last, match.range.first))))
+            val destination = match.groupValues[2].ifEmpty { match.groupValues[3] }
+            out.append("<a href=\"").append(escapeAttribute(destination)).append("\">")
+                .append(emphasize(escapeHtml(match.groupValues[1]))).append("</a>")
+            last = match.range.last + 1
+        }
         out.append(emphasize(escapeHtml(value.substring(last))))
-        return linkify(out.toString())
+        return out.toString()
     }
 
     private fun emphasize(escaped: String): String = escaped
         .replace(BOLD_PATTERN, "<strong>$1</strong>")
         .replace(ITALIC_PATTERN, "<em>$1</em>")
-
-    private fun linkify(value: String): String = LINK_PATTERN.replace(value) { match ->
-        "<a href=\"${match.groupValues[2]}\">${match.groupValues[1]}</a>"
-    }
 
     private fun escapeHtml(value: String): String = buildString(value.length) {
         for (character in value) {
