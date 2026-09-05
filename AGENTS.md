@@ -19,15 +19,25 @@ Select the model and reasoning level deliberately:
 - **Sol, `high`:** architecture, unresolved lifecycle or persistence bugs,
   security, Vault-contract changes, compatibility, and final high-risk review.
 
-Classify implementation work before delegating; file count alone is not a risk
+Before starting an implementation task, classify its risk and explicitly state
+one execution mode in the first progress update; file count alone is not a risk
 signal.
+
+- **Simple mode (default; L0 or L1):** Use one Terra agent only. For L1, Terra
+  at `high` performs discovery, implementation, affected tests, and the final
+  report. Do not create sub-agents or request a separate review unless the user
+  asks for one or the task is reclassified.
+- **Multi-agent mode (L2 or L3, or explicitly requested):** State the level,
+  each role, file ownership, and the planned handoffs before creating
+  sub-agents. Use the workflow in the table below. Sub-agents may work in
+  parallel only when their files and decisions are independent.
 
 | Level | Scope | Required workflow |
 | --- | --- | --- |
-| L0 | Questions, read-only work, typo fixes, isolated documentation | Terra only; no sub-agent. |
-| L1 | Local UI or pure-logic change without persistence, permissions, or contract effects | Terra implements and runs focused tests. |
-| L2 | Multi-screen or substantial user-visible feature without Vault/sync/concurrency risk | Sol provides a short read-only design review; Terra implements and validates; the same Sol agent performs final review. |
-| L3 | Vault data, deletes, permissions, sync, concurrency, migrations, cross-client contracts, or security | Full Sol → Terra developer → independent Terra tester → original Sol reviewer sequence. |
+| L0 | Questions, read-only work, typo fixes, isolated documentation | Simple mode: Terra only; no sub-agent. |
+| L1 | Local UI or pure-logic change without persistence, permissions, or contract effects | Simple mode: Terra implements and runs focused tests. |
+| L2 | Multi-screen or substantial user-visible feature without Vault/sync/concurrency risk | Multi-agent mode: Sol provides a short read-only design review; Terra implements and validates; the same Sol agent performs final review. |
+| L3 | Vault data, deletes, permissions, sync, concurrency, migrations, cross-client contracts, or security | Multi-agent mode: Sol → Terra developer → independent Terra tester → original Sol reviewer. |
 
 For L2 and L3, the developer updates design, contract, spec, plan, and task
 documents before implementation when the change affects them. Sol findings must
