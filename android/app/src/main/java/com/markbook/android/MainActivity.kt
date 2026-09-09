@@ -3,6 +3,7 @@ package com.markbook.android
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.view.ContextThemeWrapper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -27,6 +28,7 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -52,6 +54,8 @@ class MainActivity : Activity() {
     private var webView: WebView? = null
     private var statusView: TextView? = null
     private var saveActionView: TextView? = null
+    private var editorContextText = ""
+    private var editorStatusActions: LinearLayout? = null
     private val handler = Handler(Looper.getMainLooper())
     private val autosave = Runnable { saveCurrentNote() }
     private val saveCoordinator = RevisionSaveCoordinator()
@@ -136,6 +140,7 @@ class MainActivity : Activity() {
         webView = null
         statusView = null
         saveActionView = null
+        editorStatusActions = null
         handler.removeCallbacks(autosave)
         if (editor == null) return
         (editor.parent as? android.view.ViewGroup)?.removeView(editor)
@@ -374,33 +379,33 @@ class MainActivity : Activity() {
                 content.addView(infoBanner("今日笔记目录已不可用，已改为 Vault 根目录。请在设置中重新选择目录。"),
                     matchWrap().apply { bottomMargin = dp(12) })
             }
+            val eligibleRows = folders.isNotEmpty() || notes.isNotEmpty()
+            if (eligibleRows && !repository.swipeDiscoveryHintSeen()) {
+                content.addView(swipeDiscoveryHint(), matchWrap().apply { bottomMargin = dp(4) })
+            }
             sectionLabel(content, "文件夹", folders.size)
             if (folders.isEmpty()) {
                 content.addView(emptyState("当前目录没有文件夹"), matchWrap().apply { bottomMargin = dp(16) })
             } else {
-                folders.forEach { folder ->
-                    content.addView(swipeableVaultRow(
-                        "▸", folder.name, "文件夹", folder
-                    ) { openDirectory(folder) }, matchWrap().apply {
-                        bottomMargin = dp(8)
-                    })
-                }
+                content.addView(vaultGroup(folders.map { folder ->
+                    swipeableVaultRow(
+                        R.drawable.ic_browser_folder, folder.name, "文件夹", "文件夹", folder
+                    ) { openDirectory(folder) }
+                }), matchWrap().apply { bottomMargin = dp(12) })
             }
             sectionLabel(content, "笔记", notes.size)
             if (notes.isEmpty()) {
                 content.addView(emptyState("当前目录还没有 Markdown 笔记"), matchWrap())
             } else {
-                notes.forEach { note ->
-                    content.addView(
-                        swipeableVaultRow(
-                            "•",
-                            note.name.removeSuffix(".md"),
-                            previews[note.uri.toString()] ?: "空白笔记",
-                            note
-                        ) { openNote(note) },
-                        matchWrap().apply { bottomMargin = dp(8) }
-                    )
-                }
+                content.addView(vaultGroup(notes.map { note ->
+                    swipeableVaultRow(
+                        R.drawable.ic_browser_note,
+                        note.name.removeSuffix(".md"),
+                        previews[note.uri.toString()] ?: "空白笔记",
+                        "Markdown 笔记",
+                        note
+                    ) { openNote(note) }
+                }), matchWrap())
             }
         }
         scroll.addView(content, LinearLayout.LayoutParams(-1, -2))
@@ -552,11 +557,11 @@ class MainActivity : Activity() {
             }
             addView(trashStatusView, matchWrap())
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(TextView(this@MainActivity).apply {
-            text = "›"
-            textSize = 26f
-            gravity = Gravity.CENTER
-            setTextColor(COLOR_MUTED_TEXT)
+        addView(ImageView(this@MainActivity).apply {
+            setImageResource(R.drawable.ic_chevron_right)
+            setColorFilter(COLOR_MUTED_TEXT)
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(44), dp(44)))
         updateTrashRow()
     }
@@ -605,7 +610,7 @@ class MainActivity : Activity() {
     private fun confirmEmptyTrash() {
         val count = trashCount ?: return
         if (count <= 0 || trashClearPending) return
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle("永久清空回收站？")
             .setMessage(
                 "将永久删除当前 Vault/.trash 中的 $count 个项目。此操作无法撤销。" +
@@ -777,7 +782,7 @@ class MainActivity : Activity() {
             else -> {
                 sectionLabel(content, "文件夹", drivePickerFolders!!.size)
                 drivePickerFolders!!.forEach { folder ->
-                    content.addView(vaultRow("▸", folder.name, "Google Drive 文件夹") {
+                    content.addView(vaultRow(R.drawable.ic_browser_folder, folder.name, "Google Drive 文件夹", "Google Drive 文件夹") {
                         driveFolderHistory += driveFolderDirectory
                         driveFolderDirectory = DriveVaultRoot(folder.id, folder.name)
                         drivePickerFolders = null
@@ -827,12 +832,12 @@ class MainActivity : Activity() {
     }
 
     private fun promptCreateDriveFolder() {
-        val input = EditText(this).apply {
+        val input = EditText(dialogContext()).apply {
             hint = "文件夹名称"
             setSingleLine(true)
             setPadding(dp(20), dp(8), dp(20), dp(8))
         }
-        val dialog = AlertDialog.Builder(this)
+        val dialog = dialogBuilder()
             .setTitle("新建 Drive 文件夹")
             .setView(input)
             .setNegativeButton("取消", null)
@@ -1063,7 +1068,7 @@ class MainActivity : Activity() {
             content.addView(emptyState("当前目录没有可选子文件夹"), matchWrap())
         } else {
             folders.forEach { folder ->
-                content.addView(vaultRow("▸", folder.name, "文件夹") { openDailyFolder(folder) }, matchWrap().apply {
+                content.addView(vaultRow(R.drawable.ic_browser_folder, folder.name, "文件夹", "文件夹") { openDailyFolder(folder) }, matchWrap().apply {
                     bottomMargin = dp(8)
                 })
             }
@@ -1227,7 +1232,7 @@ class MainActivity : Activity() {
     private fun showCreateMenu() {
         if (browserMutationPending) return
         browserMutationMessage = null
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle("新建")
             .setItems(arrayOf("新建笔记", "新建文件夹")) { _, index ->
                 if (index == 0) showCreateDialog(VaultEntryKind.NOTE) else showCreateDialog(VaultEntryKind.FOLDER)
@@ -1237,13 +1242,13 @@ class MainActivity : Activity() {
 
     private fun showCreateDialog(kind: VaultEntryKind) {
         val parent = browserDirectory ?: return
-        val input = EditText(this).apply {
+        val input = EditText(dialogContext()).apply {
             hint = if (kind == VaultEntryKind.NOTE) "笔记名称" else "文件夹名称"
             setSingleLine(true)
             setPadding(dp(24), dp(4), dp(24), dp(4))
         }
         val verb = if (kind == VaultEntryKind.NOTE) "创建笔记" else "创建文件夹"
-        val dialog = AlertDialog.Builder(this)
+        val dialog = dialogBuilder()
             .setTitle(verb)
             .setView(mutationDialogView(input, "当前位置：${parent.relativePath.ifBlank { "Vault 根目录" }}" + if (kind == VaultEntryKind.NOTE) "\n笔记会自动添加 .md" else ""))
             .setNegativeButton("取消", null)
@@ -1302,7 +1307,7 @@ class MainActivity : Activity() {
     private fun showDocumentMenu(document: VaultDocument) {
         if (browserMutationPending) return
         browserMutationMessage = null
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle(document.name)
             .setItems(arrayOf("重命名", "移到回收站")) { _, index ->
                 if (index == 0) showRenameDialog(document) else confirmMoveToTrash(document)
@@ -1312,13 +1317,13 @@ class MainActivity : Activity() {
 
     private fun showRenameDialog(document: VaultDocument) {
         val kind = if (repository.isDirectory(document)) VaultEntryKind.FOLDER else VaultEntryKind.NOTE
-        val input = EditText(this).apply {
+        val input = EditText(dialogContext()).apply {
             setText(if (kind == VaultEntryKind.NOTE) document.name.removeSuffix(".md") else document.name)
             selectAll()
             setSingleLine(true)
             setPadding(dp(24), dp(4), dp(24), dp(4))
         }
-        val dialog = AlertDialog.Builder(this)
+        val dialog = dialogBuilder()
             .setTitle("重命名")
             .setView(mutationDialogView(input, "当前位置：${document.parentRelativePath.ifBlank { "Vault 根目录" }}\n不会更新其他 Markdown 链接"))
             .setNegativeButton("取消", null)
@@ -1370,14 +1375,14 @@ class MainActivity : Activity() {
 
     private fun confirmMoveToTrash(document: VaultDocument) {
         val label = if (repository.isDirectory(document)) "文件夹“${document.name}”" else "笔记“${document.name.removeSuffix(".md")}”"
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle("移到回收站？")
             .setMessage("$label 将整体移入 Vault/.trash，不会同步到 Google Drive。Markdown 链接不会更新，图片附件不会自动删除。")
             .setNegativeButton("取消", null)
             .setPositiveButton("移到回收站") { _, _ ->
                 val generation = browserLoadGeneration
                 browserMutationPending = true
-                val progress = AlertDialog.Builder(this)
+                val progress = dialogBuilder()
                     .setTitle("正在移到回收站…")
                     .setMessage("正在处理 Vault 文件；请勿重复操作。")
                     .create()
@@ -1413,10 +1418,10 @@ class MainActivity : Activity() {
             else -> "Provider 已保存为“${result.actualName}”"
         }
 
-    private fun mutationDialogView(input: EditText, message: String): View = LinearLayout(this).apply {
+    private fun mutationDialogView(input: EditText, message: String): View = LinearLayout(dialogContext()).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(8), 0, dp(8), 0)
-        addView(TextView(this@MainActivity).apply {
+        addView(TextView(dialogContext()).apply {
             text = message
             textSize = 13f
             setTextColor(COLOR_MUTED_TEXT)
@@ -1462,27 +1467,34 @@ class MainActivity : Activity() {
             setTextColor(COLOR_PRIMARY_TEXT)
             gravity = Gravity.CENTER
             maxLines = 1
+            contentDescription = note.name.removeSuffix(".md")
         }, LinearLayout.LayoutParams(0, dp(44), 1f))
         toolbar.addView(action("拍摄", false) { showCaptureChoices() })
         saveActionView = action("保存", true) { saveCurrentNote() }
         toolbar.addView(saveActionView)
         root.addView(toolbar, matchWrap())
-        root.addView(TextView(this).apply {
-            text = editorContext(note)
-            textSize = 12f
-            setTextColor(COLOR_MUTED_TEXT)
-            setPadding(dp(20), dp(7), dp(20), dp(2))
-            background = colorBlock(COLOR_SURFACE)
-            maxLines = 1
-        }, matchWrap())
-        statusView = TextView(this).apply {
-            text = "已保存"
-            textSize = 13f
-            setTextColor(COLOR_SECONDARY_TEXT)
-            setPadding(dp(20), dp(2), dp(20), dp(9))
+        editorContextText = editorContext(note)
+        val statusContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             background = colorBlock(COLOR_SURFACE)
         }
-        root.addView(statusView, matchWrap())
+        statusView = TextView(this).apply {
+            text = "已保存 · $editorContextText"
+            textSize = 13f
+            setTextColor(COLOR_SECONDARY_TEXT)
+            setPadding(dp(20), dp(6), dp(20), dp(8))
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            contentDescription = "已保存，$editorContextText"
+        }
+        statusContainer.addView(statusView, matchWrap())
+        editorStatusActions = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(dp(20), 0, dp(20), dp(8))
+        }
+        statusContainer.addView(editorStatusActions, matchWrap())
+        root.addView(statusContainer, matchWrap())
         val editor = WebView(this).apply {
             setBackgroundColor(COLOR_EDITOR_BACKGROUND)
             settings.javaScriptEnabled = true
@@ -1577,7 +1589,7 @@ class MainActivity : Activity() {
     private fun showHeadingPicker() {
         val labels = arrayOf("正文", "一级标题 H1", "二级标题 H2", "三级标题 H3", "四级标题 H4", "五级标题 H5")
         val values = arrayOf("p", "h1", "h2", "h3", "h4", "h5")
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle("标题格式")
             .setItems(labels) { _, index -> applyEditorFormat("heading", values[index]) }
             .show()
@@ -1614,12 +1626,12 @@ class MainActivity : Activity() {
         confirmLabel: String,
         onConfirm: (String) -> String?
     ) {
-        val input = EditText(this).apply {
+        val input = EditText(dialogContext()).apply {
             this.hint = hint
             setSingleLine(true)
             setPadding(dp(24), dp(4), dp(24), dp(4))
         }
-        val dialog = AlertDialog.Builder(this)
+        val dialog = dialogBuilder()
             .setTitle(title)
             .setView(input)
             .setNegativeButton("取消", null)
@@ -1697,19 +1709,37 @@ class MainActivity : Activity() {
 
     private fun updateSaveStatus() {
         val state = saveCoordinator.state
-        statusView?.text = when (state) {
+        val message = when (state) {
             RevisionSaveCoordinator.State.SAVED -> "已保存"
             RevisionSaveCoordinator.State.DIRTY -> "未保存"
             RevisionSaveCoordinator.State.SAVING -> "正在保存…"
-            RevisionSaveCoordinator.State.FAILED -> "保存失败 · 请检查 Vault 权限或存储空间后重试"
+            RevisionSaveCoordinator.State.FAILED -> "保存失败 · 点按此处重试保存；请检查 Vault 权限或存储空间"
         }
+        showEditorStatus(message, state == RevisionSaveCoordinator.State.FAILED)
         saveActionView?.isEnabled = !saveCoordinator.hasInFlightSave
         saveActionView?.alpha = if (saveCoordinator.hasInFlightSave) 0.55f else 1f
     }
 
+    private fun showEditorStatus(message: String, retryable: Boolean = false) {
+        val view = statusView ?: return
+        view.text = if (retryable) "保存失败 · 请检查 Vault 权限或存储空间" else "$message · $editorContextText"
+        view.maxLines = if (retryable) Int.MAX_VALUE else 1
+        view.ellipsize = if (retryable) null else TextUtils.TruncateAt.END
+        view.contentDescription = "$message，$editorContextText"
+        view.isClickable = false
+        view.isFocusable = false
+        view.setOnClickListener(null)
+        editorStatusActions?.apply {
+            removeAllViews()
+            visibility = if (retryable) View.VISIBLE else View.GONE
+            if (retryable) addView(action("重试保存", true) { saveCurrentNote() }, matchWrap())
+        }
+        if (retryable) view.announceForAccessibility(message)
+    }
+
     private fun showCaptureChoices() {
         if (photoSavePending || videoInsertPending) return
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle("拍摄")
             .setItems(arrayOf("拍照", "录视频")) { _, index ->
                 if (index == 0) startPhotoCapture() else startVideoCapture()
@@ -2033,7 +2063,7 @@ class MainActivity : Activity() {
                 captureFile = null
                 captureUri = null
                 showEditor(refreshed, content)
-                statusView?.text = if (cleaned) "视频已插入并保存" else "视频已保存；清理将在下次启动继续"
+                showEditorStatus(if (cleaned) "视频已插入并保存" else "视频已保存；清理将在下次启动继续")
             }
         }
     }
@@ -2170,7 +2200,7 @@ class MainActivity : Activity() {
                     photoModeActions = emptyList()
                     photoSavePending = false
                     showEditor(refreshed, content)
-                    statusView?.text = "照片已插入并保存"
+                    showEditorStatus("照片已插入并保存")
                 }
             } else {
                 repository.rollbackPhotoPair(attachments)
@@ -2363,28 +2393,66 @@ class MainActivity : Activity() {
         return "$currentVaultName · $location · ${note.name}"
     }
 
+    private fun swipeDiscoveryHint(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(52)
+        setPadding(dp(14), dp(6), dp(8), dp(6))
+        background = rounded(COLOR_ROW, dp(12))
+        contentDescription = "提示：左滑条目可重命名或移到回收站；长按也可操作。"
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        addView(TextView(this@MainActivity).apply {
+            text = "左滑条目可重命名或移到回收站；长按也可操作"
+            textSize = 13f
+            setTextColor(COLOR_SECONDARY_TEXT)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        addView(action("知道了", false) {
+            (parent as? android.view.ViewGroup)?.removeView(this)
+        }, wrapWrap())
+        repository.markSwipeDiscoveryHintSeen()
+        post { announceForAccessibility("提示：左滑条目可重命名或移到回收站；长按也可操作。") }
+    }
+
+    private fun vaultGroup(rows: List<View>): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(COLOR_ROW, dp(14))
+        clipToOutline = true
+        clipChildren = true
+        rows.forEachIndexed { index, row ->
+            addView(row, matchWrap())
+            if (index < rows.lastIndex) {
+                addView(View(this@MainActivity).apply { setBackgroundColor(COLOR_DIVIDER) },
+                    LinearLayout.LayoutParams(-1, dp(1)).apply {
+                        leftMargin = dp(54)
+                    })
+            }
+        }
+    }
+
     private fun vaultRow(
-        icon: String,
+        icon: Int,
         title: String,
         subtitle: String,
+        itemType: String = "",
         trailingLabel: String = "",
         trailingAction: (() -> Unit)? = null,
+        grouped: Boolean = false,
         action: () -> Unit
     ): View = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = dp(64)
         setPadding(dp(14), dp(8), dp(12), dp(8))
-        background = rounded(COLOR_ROW, dp(14))
+        background = rippleBackground(COLOR_ROW, if (grouped) 0 else dp(14))
         isClickable = true
         isFocusable = true
-        contentDescription = title
+        contentDescription = listOf(itemType, title, subtitle).filter { it.isNotBlank() }.joinToString("，")
         setOnClickListener { action() }
-        addView(TextView(this@MainActivity).apply {
-            text = icon
-            textSize = 23f
-            gravity = Gravity.CENTER
-            setTextColor(COLOR_ACCENT)
+        addView(ImageView(this@MainActivity).apply {
+            setImageResource(icon)
+            setColorFilter(COLOR_ACCENT)
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(32), dp(44)))
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
@@ -2404,11 +2472,11 @@ class MainActivity : Activity() {
             }, matchWrap())
         }, LinearLayout.LayoutParams(0, -2, 1f))
         if (trailingAction == null) {
-            addView(TextView(this@MainActivity).apply {
-                text = "›"
-                textSize = 26f
-                gravity = Gravity.CENTER
-                setTextColor(COLOR_MUTED_TEXT)
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_chevron_right)
+                setColorFilter(COLOR_MUTED_TEXT)
+                scaleType = android.widget.ImageView.ScaleType.CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }, LinearLayout.LayoutParams(dp(28), dp(44)))
         } else {
             addView(action(trailingLabel, false, trailingAction), LinearLayout.LayoutParams(dp(56), dp(44)))
@@ -2416,9 +2484,10 @@ class MainActivity : Activity() {
     }
 
     private fun swipeableVaultRow(
-        icon: String,
+        icon: Int,
         title: String,
         subtitle: String,
+        itemType: String,
         document: VaultDocument,
         activate: () -> Unit
     ): View {
@@ -2440,11 +2509,13 @@ class MainActivity : Activity() {
                 confirmMoveToTrash(document)
             }, LinearLayout.LayoutParams(0, -1, 1f))
         }
-        val foreground = vaultRow(icon, title, subtitle, action = activate)
+        val label = listOf(itemType, title, subtitle).filter { it.isNotBlank() }.joinToString("，")
+        val foreground = vaultRow(icon, title, subtitle, itemType, grouped = true, action = activate)
         row.bind(
             foreground = foreground,
             actionStrip = actionStrip,
             title = title,
+            accessibilityLabel = label,
             onActivate = {
                 if (!consumeSwipeDismissActivation()) activate()
             },
@@ -2515,7 +2586,7 @@ class MainActivity : Activity() {
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = dp(68)
         setPadding(dp(16), dp(10), dp(12), dp(10))
-        background = rounded(COLOR_ROW, dp(14))
+        background = rippleBackground(COLOR_ROW, dp(14))
         isClickable = true
         isFocusable = true
         contentDescription = "$title，$subtitle"
@@ -2535,12 +2606,21 @@ class MainActivity : Activity() {
                 setPadding(0, dp(3), 0, 0)
             }, matchWrap())
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(TextView(this@MainActivity).apply {
-            text = if (selected) "已启用  ✓" else "›"
-            textSize = if (selected) 13f else 26f
-            gravity = Gravity.CENTER
-            setTextColor(if (selected) COLOR_ACCENT else COLOR_MUTED_TEXT)
-        }, LinearLayout.LayoutParams(dp(72), dp(44)))
+        if (selected) {
+            addView(TextView(this@MainActivity).apply {
+                text = "已启用  ✓"
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTextColor(COLOR_ACCENT)
+            }, LinearLayout.LayoutParams(dp(72), dp(44)))
+        } else {
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_chevron_right)
+                setColorFilter(COLOR_MUTED_TEXT)
+                scaleType = android.widget.ImageView.ScaleType.CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(72), dp(44)))
+        }
     }
 
     private fun settingsStatusRow(title: String, subtitle: String, status: String, active: Boolean): View = LinearLayout(this).apply {
@@ -2598,7 +2678,7 @@ class MainActivity : Activity() {
         minimumHeight = dp(44)
         setPadding(dp(12), 0, dp(12), 0)
         setTextColor(if (primary) COLOR_ON_ACCENT else COLOR_PRIMARY_TEXT)
-        background = rounded(if (primary) COLOR_ACCENT else COLOR_ROW, dp(12))
+        background = rippleBackground(if (primary) COLOR_ACCENT else COLOR_ROW, dp(12))
         isClickable = true
         isFocusable = true
         contentDescription = label
@@ -2660,6 +2740,15 @@ class MainActivity : Activity() {
         cornerRadius = radius.toFloat()
     }
 
+    private fun rippleBackground(color: Int, radius: Int): android.graphics.drawable.RippleDrawable =
+        android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(
+                if (isNightTheme()) COLOR_ACCENT else Color.argb(42, 47, 107, 79)
+            ),
+            rounded(color, radius),
+            null
+        )
+
     private fun colorBlock(color: Int): GradientDrawable = GradientDrawable().apply { setColor(color) }
 
     private fun matchWrap(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(-1, -2)
@@ -2672,6 +2761,13 @@ class MainActivity : Activity() {
         SimpleDateFormat("MM-dd HH:mm", Locale.US).format(Date(time))
 
     private fun isNightTheme(): Boolean = repository.appearanceMode() == VaultRepository.APPEARANCE_NIGHT
+
+    private fun dialogContext(): ContextThemeWrapper = ContextThemeWrapper(
+        this,
+        if (isNightTheme()) R.style.AppTheme_Dialog_Night else R.style.AppTheme_Dialog_Light
+    )
+
+    private fun dialogBuilder(): AlertDialog.Builder = AlertDialog.Builder(dialogContext())
 
     private fun applyWindowColors() {
         window.statusBarColor = COLOR_SURFACE
@@ -2692,6 +2788,8 @@ class MainActivity : Activity() {
         get() = if (isNightTheme()) Color.rgb(27, 38, 33) else Color.WHITE
     private val COLOR_ROW: Int
         get() = if (isNightTheme()) Color.rgb(40, 54, 47) else Color.rgb(237, 241, 237)
+    private val COLOR_DIVIDER: Int
+        get() = if (isNightTheme()) Color.rgb(61, 78, 68) else Color.rgb(215, 223, 216)
     private val COLOR_EDITOR_BACKGROUND: Int
         get() = if (isNightTheme()) Color.rgb(24, 35, 30) else Color.rgb(247, 247, 242)
     private val COLOR_ACCENT: Int
@@ -2703,7 +2801,7 @@ class MainActivity : Activity() {
     private val COLOR_MUTED_TEXT: Int
         get() = if (isNightTheme()) Color.rgb(158, 178, 166) else Color.rgb(102, 113, 107)
     private val COLOR_ON_ACCENT: Int
-        get() = Color.WHITE
+        get() = if (isNightTheme()) Color.rgb(24, 32, 28) else Color.WHITE
     private val COLOR_RENAME_ACTION: Int
         get() = if (isNightTheme()) Color.rgb(46, 94, 150) else Color.rgb(37, 105, 169)
     private val COLOR_TRASH_ACTION: Int

@@ -113,6 +113,7 @@ class SwipeActionRow(
   private var longPressHandled = false
   private var open = false
   private var rowTitle = ""
+  private var rowAccessibilityLabel = ""
   private var onActivate: (() -> Unit)? = null
   private var onLongPress: (() -> Unit)? = null
   private var onRename: (() -> Unit)? = null
@@ -132,6 +133,7 @@ class SwipeActionRow(
     foreground: View,
     actionStrip: View,
     title: String,
+    accessibilityLabel: String,
     onActivate: () -> Unit,
     onLongPress: () -> Unit,
     onRename: () -> Unit,
@@ -142,6 +144,7 @@ class SwipeActionRow(
     this.foreground = foreground
     this.actionStrip = actionStrip
     this.rowTitle = title
+    this.rowAccessibilityLabel = accessibilityLabel
     this.onActivate = onActivate
     this.onLongPress = onLongPress
     this.onRename = onRename
@@ -306,7 +309,7 @@ class SwipeActionRow(
     }
     val state = if (open) "操作已展开" else "操作已收起"
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) content.stateDescription = state
-    content.contentDescription = "$rowTitle，$state"
+    content.contentDescription = "$rowAccessibilityLabel，$state"
     if (announce) announceForAccessibility("$rowTitle，已显示重命名和移到回收站操作")
   }
 

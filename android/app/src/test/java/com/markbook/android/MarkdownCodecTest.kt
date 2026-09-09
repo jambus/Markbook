@@ -162,6 +162,17 @@ class MarkdownCodecTest {
     }
 
     @Test
+    fun documentUsesReadableThemeStylesWithoutChangingBodyRendering() {
+        val day = MarkdownCodec.toHtml("# 标题\n\n[链接](https://obsidian.md)\n", attachmentUrl, false)
+        val night = MarkdownCodec.toHtml("# 标题\n\n[链接](https://obsidian.md)\n", attachmentUrl, true)
+
+        assertTrue(day.contains("text-decoration:underline"))
+        assertTrue(day.contains("<h1>标题</h1>"))
+        assertTrue(day.contains("<a href=\"https://obsidian.md\">链接</a>"))
+        assertTrue(night.contains("#a7e7c1"))
+    }
+
+    @Test
     fun documentWithoutTrailingNewlineKeepsLastLine() {
         assertEquals("<p>last</p>", render("last"))
     }

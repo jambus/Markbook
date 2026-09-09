@@ -180,15 +180,16 @@ object MarkdownCodec {
         val text = if (nightMode) "#eff6f1" else "#18201c"
         val heading = if (nightMode) "#ffffff" else "#18201c"
         val caret = if (nightMode) "#8dcfa8" else "#2f6b4f"
+        val link = if (nightMode) "#a7e7c1" else "#246343"
         val rawBackground = if (nightMode) "#22302a" else "#ecefe9"
         val rawBorder = if (nightMode) "#8dcfa8" else "#2f6b4f"
         val rawText = if (nightMode) "#c3d3c9" else "#46514b"
         return """
             <!doctype html>
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-            <style>body{margin:0;background:$background} #editor{box-sizing:border-box;max-width:760px;min-height:100vh;margin:0 auto;padding:18px 20px 56px;font-family:sans-serif;font-size:1.125rem;line-height:1.62;color:$text;caret-color:$caret;outline:none}
-            img{max-width:100%;height:auto;border-radius:8px} h1,h2,h3,h4,h5{line-height:1.25;color:$heading} h1{font-size:1.7em;margin-top:.35em} h2{font-size:1.3em;margin-top:1.45em} h3{font-size:1.12em;margin-top:1.3em} h4{font-size:1em;margin-top:1.2em} h5{font-size:.9em;margin-top:1.1em} p{margin:.6em 0} ul{padding-left:1.35em}
-            pre.markbook-raw{margin:.6em 0;padding:10px 12px;border-left:3px solid $rawBorder;border-radius:6px;background:$rawBackground;color:$rawText;font-family:monospace;font-size:.9em;line-height:1.5;white-space:pre-wrap;word-break:break-word;user-select:text}</style></head>
+            <style>body{margin:0;background:$background} #editor{box-sizing:border-box;max-width:760px;min-height:100vh;margin:0 auto;padding:20px 20px 64px;font-family:sans-serif;font-size:1.125rem;line-height:1.68;color:$text;caret-color:$caret;outline:none}
+            img{display:block;max-width:100%;height:auto;margin:1em 0;border-radius:10px} h1,h2,h3,h4,h5{font-weight:700;line-height:1.24;color:$heading} h1{font-size:1.72em;margin:.35em 0 .7em} h2{font-size:1.32em;margin:1.65em 0 .58em} h3{font-size:1.15em;margin:1.45em 0 .48em} h4{font-size:1.02em;margin:1.28em 0 .4em} h5{font-size:.92em;margin:1.15em 0 .35em} p{margin:.72em 0} ul{margin:.7em 0;padding-left:1.4em} li{margin:.28em 0} a{color:$link;text-decoration:underline;text-decoration-thickness:.09em;text-underline-offset:.13em} strong{font-weight:700} em{font-style:italic}
+            pre.markbook-raw{margin:1em 0;padding:11px 12px;border-left:3px solid $rawBorder;border-radius:8px;background:$rawBackground;color:$rawText;font-family:monospace;font-size:.9em;line-height:1.55;white-space:pre-wrap;word-break:break-word;user-select:text}</style></head>
             <body><div id="editor" contenteditable="true" spellcheck="true">$body</div></body>
             <script>
             (function() {

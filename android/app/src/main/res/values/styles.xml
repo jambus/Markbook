@@ -2,9 +2,15 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#1565C0</item>
+        <item name="android:colorAccent">#2F6B4F</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:statusBarColor">#FFFFFF</item>
         <item name="android:windowLightStatusBar">true</item>
+    </style>
+    <style name="AppTheme.Dialog.Light" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#2F6B4F</item>
+    </style>
+    <style name="AppTheme.Dialog.Night" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#8DCFA8</item>
     </style>
 </resources>

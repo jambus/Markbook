@@ -128,6 +128,12 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         preferences.edit().putString(APPEARANCE_MODE_KEY, mode).apply()
     }
 
+    fun swipeDiscoveryHintSeen(): Boolean = preferences.getBoolean(SWIPE_DISCOVERY_HINT_SEEN_KEY, false)
+
+    fun markSwipeDiscoveryHintSeen() {
+        preferences.edit().putBoolean(SWIPE_DISCOVERY_HINT_SEEN_KEY, true).apply()
+    }
+
     fun dailyNoteDirectoryPath(): String = preferences.getString(
         DAILY_NOTE_DIRECTORY_KEY,
         DEFAULT_DAILY_NOTE_DIRECTORY
@@ -1153,6 +1159,7 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
     companion object {
         private const val VAULT_URI_KEY = "vault_uri"
         private const val APPEARANCE_MODE_KEY = "appearance_mode"
+        private const val SWIPE_DISCOVERY_HINT_SEEN_KEY = "swipe_discovery_hint_seen"
         private const val DAILY_NOTE_DIRECTORY_KEY = "daily_note_directory"
         private const val DAILY_DIRECTORY_RESET_NOTICE_KEY = "daily_note_directory_reset_notice"
         private const val PENDING_VIDEO_NOTE_URI = "pending_video_note_uri"
