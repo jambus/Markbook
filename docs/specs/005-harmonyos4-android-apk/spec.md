@@ -63,8 +63,8 @@ Mate 60 真机验收前，该版本不得标记为正式发布。
 - **FR-503** 必须实现规格 `001` 的本地笔记 P1 能力。
 - **FR-504** 必须实现规格 `002` 的拍照、裁剪和透视校正 P1 能力。
 - **FR-505** 所有 Markdown 和附件必须直接写入 Vault，不得只存于应用私有目录。
-- **FR-506** Google Drive 接入不得依赖 Google Play Services；同步延期到本地与
-  拍照闭环验收之后。
+- **FR-506** Google Drive 首阶段不得使用已废弃的 Drive Android API；Google Play 服务
+  账号授权仅在 Mate 60 真机验证可用后作为当前切片依赖，替代授权方案由 `003` 跟踪。
 - **FR-507** Android API 等级、WebView、相机 URI 和后台限制必须以 Mate 60
   HarmonyOS 4 真机结果确定。
 - **FR-508** 首个里程碑必须输出可安装 APK、版本信息和真机验收记录。

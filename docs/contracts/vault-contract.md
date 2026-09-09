@@ -107,3 +107,13 @@ partial failure leaves every undeleted item in place for a later retry.
 When both sides changed the same path, keep both versions under
 `.markbook/conflicts/` or with a deterministic `冲突-<device>-<timestamp>` suffix.
 No client silently overwrites the other version.
+
+## Sync execution and local editing
+
+Remote sync providers execute outside individual editor or settings pages. Their queue state,
+progress, result summaries, and provider-specific credentials are device-local, reconstructible
+metadata and never Vault content. A running sync must not block reading or editing a local note;
+the next sync comparison picks up a later local save. If a remote-only file appears locally while
+a sync is running, the provider must preserve the local file and report a conflict rather than
+replace it. At most one sync job may modify a Vault at a time. Interrupted jobs are reported as
+interrupted and require an explicit retry; they must never be presented as successful.

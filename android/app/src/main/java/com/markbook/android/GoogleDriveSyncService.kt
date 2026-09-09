@@ -68,7 +68,7 @@ class GoogleDriveSyncService(
                         val stamp = conflictStamp()
                         val remoteConflictPath = conflictPath(path, "Google Drive", stamp)
                         api.download(remote).use { input ->
-                            val saved = repository.writeSyncFile(
+                            val saved = repository.writeSyncFileIfAbsent(
                                 remoteConflictPath,
                                 remote.mimeType,
                                 input
@@ -95,12 +95,20 @@ class GoogleDriveSyncService(
             if (cancelled.get()) return result(uploaded, downloaded, unchanged, conflicts, errors, true)
             try {
                 report(completed, total, "正在下载 $path")
-                api.download(remote).use { input ->
-                    if (!repository.writeSyncFile(path, remote.mimeType, input)) {
-                        throw IllegalStateException("Unable to save downloaded file")
-                    }
+                val downloadedToOriginalPath = api.download(remote).use { input ->
+                    repository.writeSyncFileIfAbsent(path, remote.mimeType, input)
                 }
-                downloaded++
+                if (downloadedToOriginalPath) {
+                    downloaded++
+                } else {
+                    val remoteConflictPath = conflictPath(path, "Google Drive", conflictStamp())
+                    val preserved = api.download(remote).use { input ->
+                        repository.writeSyncFileIfAbsent(remoteConflictPath, remote.mimeType, input)
+                    }
+                    if (!preserved) throw IllegalStateException("Unable to preserve remote conflict copy")
+                    conflicts++
+                    report(completed, total, "本地文件在同步期间发生变化，已保留冲突副本：$path")
+                }
             } catch (failure: Exception) {
                 errors += "$path: ${userMessage(failure)}"
             }
@@ -119,12 +127,14 @@ class GoogleDriveSyncService(
         if (cancelled.get()) return
         api.listChildren(parentId).forEach { item ->
             val path = join(prefix, item.name)
-            if (!remotePathAllowed(path)) return@forEach
+            if (!remotePathAllowed(path, item.mimeType == GoogleDriveApi.FOLDER_MIME_TYPE)) return@forEach
             if (item.mimeType == GoogleDriveApi.FOLDER_MIME_TYPE) {
                 folders[path] = item.id
                 scanRemote(item.id, path, files, folders)
             } else if (!item.mimeType.startsWith("application/vnd.google-apps.")) {
-                files[path] = item
+                if (files.put(path, item) != null) {
+                    throw DriveApiException("Google Drive contains duplicate paths; rename one before syncing")
+                }
             }
         }
     }
@@ -176,17 +186,15 @@ class GoogleDriveSyncService(
         return join(parent, "$stem ($source conflict $stamp)$extension")
     }
 
-    private fun remotePathAllowed(path: String): Boolean {
+    private fun remotePathAllowed(path: String, directory: Boolean): Boolean {
         val parts = path.split('/')
         if (parts.any { it.isBlank() || it == "." || it == ".." || it.contains('\\') }) return false
-        if (parts.firstOrNull() == ".obsidian") return false
-        if (parts.firstOrNull() == ".trash" || parts.firstOrNull() == ".markbook") return false
-        return parts.none { it.startsWith(".markbook-") || it.endsWith(".tmp") || it.endsWith(".bak") || it.endsWith(".txn") }
+        return SyncPathPolicy.isAllowed(path, directory)
     }
 
     private fun join(parent: String, name: String): String = if (parent.isBlank()) name else "$parent/$name"
 
-    private fun conflictStamp(): String = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+    private fun conflictStamp(): String = SimpleDateFormat("yyyyMMdd-HHmmssSSS", Locale.US).format(Date())
 
     private fun report(completed: Int, total: Int, message: String) = onProgress(DriveSyncProgress(completed, total, message))
 

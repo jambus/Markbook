@@ -28,6 +28,16 @@
 - `expectedRevision`: 条件操作所需的远端版本。
 - `state`: pending、running、completed、failed、cancelled。
 
+## SyncJobState
+
+- `providerId`、`providerName`、`targetName`：用于统一呈现，不含凭据或远端 URI。
+- `status`: running、succeeded、failed、cancelled、interrupted。
+- `startedAt`、`finishedAt`、`completed`、`total`、`message`：可恢复的任务进度与摘要。
+- `summary`: uploaded、downloaded、unchanged、conflicts。
+- `issues`: 最多五项脱敏文件级错误；系统通知仅提示在应用内查看详情。
+
+每个 Vault 只有一个活动 `SyncJobState`。该状态为设备本地、可重建元数据，不能进入 Vault 或同步范围。
+
 ## SyncContentSource
 
 - `size`：内容总字节数。

@@ -100,11 +100,11 @@ sealed class VaultMutationResult {
     data class Failure(val kind: VaultMutationFailureKind, val message: String? = null) : VaultMutationResult()
 }
 
-class VaultRepository(private val context: Context) {
+class VaultRepository(private val context: Context, private val fixedVaultUri: Uri? = null) {
     private val resolver: ContentResolver = context.contentResolver
     private val preferences = context.getSharedPreferences("markbook", Context.MODE_PRIVATE)
 
-    fun savedVaultUri(): Uri? = preferences.getString(VAULT_URI_KEY, null)?.let(Uri::parse)
+    fun savedVaultUri(): Uri? = fixedVaultUri ?: preferences.getString(VAULT_URI_KEY, null)?.let(Uri::parse)
 
     fun rememberVault(uri: Uri) {
         val flags = IntentFlags.READ_WRITE
@@ -758,6 +758,38 @@ class VaultRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Commits a remote-only download only if a local file has not appeared since the scan.
+     * This deliberately fails closed: the caller must keep the remote version as a conflict copy.
+     */
+    fun writeSyncFileIfAbsent(relativePath: String, mimeType: String?, input: InputStream): Boolean {
+        val cleanPath = safeSyncPath(relativePath) ?: return false
+        val tree = savedVaultUri() ?: return false
+        val parts = cleanPath.split('/')
+        val name = parts.last()
+        val parent = findOrCreateDirectory(tree, parts.dropLast(1)) ?: return false
+        if (findChild(tree, parent, name) != null) return false
+        val temp = DocumentsContract.createDocument(
+            resolver,
+            parent,
+            mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream",
+            ".markbook-${UUID.randomUUID()}.tmp"
+        ) ?: return false
+        return try {
+            resolver.openOutputStream(temp, "wt")?.use { output -> copyStream(input, output) }
+                ?: throw IllegalStateException("Unable to write downloaded file")
+            // Check immediately before final rename so a concurrently created or saved local note wins.
+            if (findChild(tree, parent, name) != null) throw IllegalStateException("Local file changed during sync")
+            if (DocumentsContract.renameDocument(resolver, temp, name) == null) {
+                throw IllegalStateException("Unable to commit downloaded file")
+            }
+            true
+        } catch (_: Exception) {
+            try { DocumentsContract.deleteDocument(resolver, temp) } catch (_: Exception) { }
+            false
+        }
+    }
+
     fun htmlAttachmentUrl(relativePath: String): String =
         "markbook://attachment/" + Uri.encode(relativePath, "/")
 
@@ -790,13 +822,7 @@ class VaultRepository(private val context: Context) {
     }
 
     private fun syncPathAllowed(path: String, directory: Boolean): Boolean {
-        val parts = path.split('/')
-        if (parts.firstOrNull() == ".obsidian") return false
-        if (parts.firstOrNull() == ".trash") return false
-        if (parts.any { it.startsWith(".markbook-") || it.endsWith(".tmp") || it.endsWith(".bak") || it.endsWith(".txn") }) return false
-        // All Markbook metadata is local state; the Vault-level .trash directory is excluded above.
-        if (parts.firstOrNull() == ".markbook") return false
-        return directory || parts.lastOrNull()?.isNotBlank() == true
+        return SyncPathPolicy.isAllowed(path, directory)
     }
 
     private fun safeSyncPath(relativePath: String): String? {
