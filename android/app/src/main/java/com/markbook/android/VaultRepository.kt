@@ -20,7 +20,8 @@ data class VaultDocument(
     val name: String,
     val mimeType: String?,
     val parentUri: Uri? = null,
-    val relativePath: String = ""
+    val relativePath: String = "",
+    val lastModified: Long? = null
 ) {
     val parentRelativePath: String
         get() = relativePath.substringBeforeLast('/', "")
@@ -63,6 +64,14 @@ sealed class DailyNoteResult {
 sealed class VaultRecoveryResult {
     object Success : VaultRecoveryResult()
     data class Failure(val kind: VaultFailureKind) : VaultRecoveryResult()
+}
+
+data class VaultSearchHit(val document: VaultDocument, val match: VaultSearchMatch)
+
+sealed class VaultSearchResult {
+    data class Success(val hits: List<VaultSearchHit>, val unreadableCount: Int) : VaultSearchResult()
+    data class Failure(val kind: VaultFailureKind) : VaultSearchResult()
+    object Cancelled : VaultSearchResult()
 }
 
 sealed class TrashContentsResult {
@@ -177,6 +186,51 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
     fun children(directory: VaultDocument): List<VaultDocument> {
         val tree = savedVaultUri() ?: return emptyList()
         return listChildren(tree, directory.uri, directory.relativePath)
+    }
+
+    fun searchNotes(query: String, shouldContinue: () -> Boolean = { true }): VaultSearchResult {
+        val tree = savedVaultUri() ?: return VaultSearchResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+        val root = vaultRoot() ?: return VaultSearchResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+        val hits = mutableListOf<VaultSearchHit>()
+        var unreadable = 0
+        fun scan(directory: VaultDocument): Boolean {
+            if (!shouldContinue()) return false
+            val children = try {
+                listChildrenStrict(tree, directory.uri, directory.relativePath)
+            } catch (_: Exception) {
+                if (directory == root) return false
+                unreadable += 1
+                return true
+            }
+            children.forEach { child ->
+                if (!shouldContinue()) return false
+                if (VaultPathPolicy.isProtected(child.relativePath) || child.name.startsWith(".markbook-")) return@forEach
+                if (isDirectory(child)) {
+                    if (!scan(child)) return false
+                } else if (child.name.endsWith(".md", true)) {
+                    val content = readText(child)
+                    if (content == null) unreadable += 1 else {
+                        VaultSearchPolicy.match(child.name.removeSuffix(".md"), content, query)?.let { match ->
+                            hits += VaultSearchHit(child, match)
+                        }
+                    }
+                }
+            }
+            return true
+        }
+        return try {
+            if (!scan(root)) return if (shouldContinue()) VaultSearchResult.Failure(VaultFailureKind.READ_FAILED) else VaultSearchResult.Cancelled
+            VaultSearchResult.Success(
+                hits.sortedWith(compareBy<VaultSearchHit> { it.match.rank }
+                    .thenBy { it.document.name.lowercase() }
+                    .thenBy { it.document.relativePath.lowercase() }),
+                unreadable
+            )
+        } catch (_: SecurityException) {
+            VaultSearchResult.Failure(VaultFailureKind.PERMISSION_DENIED)
+        } catch (_: Exception) {
+            VaultSearchResult.Failure(VaultFailureKind.READ_FAILED)
+        }
     }
 
     fun canReadDirectory(directory: VaultDocument): Boolean {
@@ -1019,12 +1073,14 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         val projection = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
         )
         return resolver.query(children, projection, null, null, null)?.use { cursor ->
             val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
             val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
             val mimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val modifiedIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
             buildList {
                 while (cursor.moveToNext()) {
                     val name = cursor.getString(nameIndex) ?: continue
@@ -1035,7 +1091,8 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
                         name,
                         cursor.getString(mimeIndex),
                         parent,
-                        joinRelativePath(parentRelativePath, name)
+                        joinRelativePath(parentRelativePath, name),
+                        if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) cursor.getLong(modifiedIndex) else null
                     ))
                 }
             }

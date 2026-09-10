@@ -188,7 +188,7 @@ object MarkdownCodec {
             <!doctype html>
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
             <style>body{margin:0;background:$background} #editor{box-sizing:border-box;max-width:760px;min-height:100vh;margin:0 auto;padding:20px 20px 64px;font-family:sans-serif;font-size:1.125rem;line-height:1.68;color:$text;caret-color:$caret;outline:none}
-            img{display:block;max-width:100%;height:auto;margin:1em 0;border-radius:10px} h1,h2,h3,h4,h5{font-weight:700;line-height:1.24;color:$heading} h1{font-size:1.72em;margin:.35em 0 .7em} h2{font-size:1.32em;margin:1.65em 0 .58em} h3{font-size:1.15em;margin:1.45em 0 .48em} h4{font-size:1.02em;margin:1.28em 0 .4em} h5{font-size:.92em;margin:1.15em 0 .35em} p{margin:.72em 0} ul{margin:.7em 0;padding-left:1.4em} li{margin:.28em 0} a{color:$link;text-decoration:underline;text-decoration-thickness:.09em;text-underline-offset:.13em} strong{font-weight:700} em{font-style:italic}
+            img{display:block;max-width:100%;height:auto;margin:1em 0;border-radius:10px} .markbook-inserted{outline:3px solid $caret;outline-offset:3px;border-radius:10px} h1,h2,h3,h4,h5{font-weight:700;line-height:1.24;color:$heading} h1{font-size:1.72em;margin:.35em 0 .7em} h2{font-size:1.32em;margin:1.65em 0 .58em} h3{font-size:1.15em;margin:1.45em 0 .48em} h4{font-size:1.02em;margin:1.28em 0 .4em} h5{font-size:.92em;margin:1.15em 0 .35em} p{margin:.72em 0} ul{margin:.7em 0;padding-left:1.4em} li{margin:.28em 0} a{color:$link;text-decoration:underline;text-decoration-thickness:.09em;text-underline-offset:.13em} strong{font-weight:700} em{font-style:italic}
             pre.markbook-raw{margin:1em 0;padding:11px 12px;border-left:3px solid $rawBorder;border-radius:8px;background:$rawBackground;color:$rawText;font-family:monospace;font-size:.9em;line-height:1.55;white-space:pre-wrap;word-break:break-word;user-select:text}</style></head>
             <body><div id="editor" contenteditable="true" spellcheck="true">$body</div></body>
             <script>
@@ -243,6 +243,16 @@ object MarkdownCodec {
               }
               function notifyChange() {
                 if (window.Android) Android.onChanged();
+                notifyFormatState();
+              }
+              function notifyFormatState() {
+                if (!window.Android || !Android.onFormatState) return;
+                var block = (document.queryCommandValue('formatBlock') || 'p').toLowerCase();
+                Android.onFormatState(JSON.stringify({
+                  undo: document.queryCommandEnabled('undo'), redo: document.queryCommandEnabled('redo'),
+                  heading: block !== 'p' && block !== 'div', bold: document.queryCommandState('bold'),
+                  italic: document.queryCommandState('italic')
+                }));
               }
               function selectedText() {
                 var selection = window.getSelection();
@@ -300,13 +310,35 @@ object MarkdownCodec {
                     if (images[i].getAttribute('data-markdown') !== path) continue;
                     var range = document.createRange(), selection = window.getSelection();
                     range.setStartAfter(images[i]); range.collapse(true);
-                    selection.removeAllRanges(); selection.addRange(range); editor.focus(); return true;
+                    selection.removeAllRanges(); selection.addRange(range); editor.focus();
+                    images[i].scrollIntoView({block:'nearest'});
+                    if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                      images[i].classList.add('markbook-inserted');
+                      setTimeout(function() { images[i].classList.remove('markbook-inserted'); }, 900);
+                    }
+                    return true;
+                  }
+                  return false;
+                },
+                focusAfterLink: function(path) {
+                  var links = editor.querySelectorAll('a[href]');
+                  for (var i = 0; i < links.length; i++) {
+                    if (links[i].getAttribute('href') !== path) continue;
+                    var range = document.createRange(), selection = window.getSelection();
+                    range.setStartAfter(links[i]); range.collapse(true);
+                    selection.removeAllRanges(); selection.addRange(range); editor.focus();
+                    links[i].scrollIntoView({block:'nearest'});
+                    if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                      links[i].classList.add('markbook-inserted');
+                      setTimeout(function() { links[i].classList.remove('markbook-inserted'); }, 900);
+                    }
+                    return true;
                   }
                   return false;
                 },
                 applyFormat: applyFormat
               };
-              document.addEventListener('selectionchange', rememberSelection);
+              document.addEventListener('selectionchange', function() { rememberSelection(); notifyFormatState(); });
               editor.addEventListener('keyup', rememberSelection);
               editor.addEventListener('mouseup', rememberSelection);
               editor.addEventListener('paste', function(event) {
@@ -315,7 +347,7 @@ object MarkdownCodec {
                 var plain = clipboard ? clipboard.getData('text/plain') : '';
                 if (plain) document.execCommand('insertText', false, plain);
               });
-              editor.addEventListener('input', function() { if (window.Android) Android.onChanged(); });
+              editor.addEventListener('input', function() { notifyChange(); });
               editor.addEventListener('click', function(event) {
                 var node = event.target;
                 if (!node || node.tagName.toLowerCase() !== 'a') return;
@@ -323,6 +355,7 @@ object MarkdownCodec {
                 if (/^https?:/i.test(href) || !window.Android || !window.Android.openAttachment) return;
                 event.preventDefault(); Android.openAttachment(href);
               });
+              setTimeout(notifyFormatState, 0);
             })();
             </script></html>
         """.trimIndent()

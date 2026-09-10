@@ -30,6 +30,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -56,6 +57,7 @@ class MainActivity : Activity() {
     private var saveActionView: TextView? = null
     private var editorContextText = ""
     private var editorStatusActions: LinearLayout? = null
+    private val formatActions = mutableMapOf<String, ImageButton>()
     private val handler = Handler(Looper.getMainLooper())
     private val autosave = Runnable { saveCurrentNote() }
     private val saveCoordinator = RevisionSaveCoordinator()
@@ -100,6 +102,16 @@ class MainActivity : Activity() {
     private var videoInsertPending = false
     private var pendingEditorScrollY: Int? = null
     private var pendingCaretImagePath: String? = null
+    private var pendingCaretLinkPath: String? = null
+    private var searchQuery = ""
+    private var searchResults: List<VaultSearchHit> = emptyList()
+    private var searchMessage = "输入标题、正文或标签"
+    private var searchGeneration = 0L
+    private var searchScrollY = 0
+    private var searchResultsView: LinearLayout? = null
+    private var searchResultFocus = -1
+    private var openedFromSearch = false
+    private val searchDebounceToken = Any()
     private var screen = Screen.WELCOME
     private var driveFolderDirectory = DriveVaultRoot("root", "我的云端硬盘")
     private val driveFolderHistory = mutableListOf<DriveVaultRoot>()
@@ -152,7 +164,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when (screen) {
             Screen.EDITOR -> returnToBrowser()
-            Screen.EDITOR_LOADING, Screen.EDITOR_ERROR -> showVaultBrowser()
+            Screen.EDITOR_LOADING, Screen.EDITOR_ERROR -> if (openedFromSearch) showSearch() else showVaultBrowser()
             Screen.BROWSER -> {
                 if (closeOpenSwipeRow()) return
                 if (browserPath.isNotEmpty()) showParentDirectory() else super.onBackPressed()
@@ -163,6 +175,7 @@ class MainActivity : Activity() {
             Screen.DAILY_FOLDER_PICKER -> showSettings()
             Screen.DRIVE_SETUP, Screen.DRIVE_DETAILS -> showSettings()
             Screen.DRIVE_FOLDER_PICKER, Screen.DRIVE_CONFIRM -> showDriveSetup()
+            Screen.SEARCH -> showVaultBrowser()
             Screen.WELCOME -> super.onBackPressed()
         }
     }
@@ -401,10 +414,10 @@ class MainActivity : Activity() {
                     swipeableVaultRow(
                         R.drawable.ic_browser_note,
                         note.name.removeSuffix(".md"),
-                        previews[note.uri.toString()] ?: "空白笔记",
+                        noteMetadata(note, previews[note.uri.toString()] ?: "空白笔记"),
                         "Markdown 笔记",
                         note
-                    ) { openNote(note) }
+                    ) { openedFromSearch = false; openNote(note) }
                 }), matchWrap())
             }
         }
@@ -426,8 +439,8 @@ class MainActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(COLOR_PRIMARY_TEXT)
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        addView(action("设置", false) { showSettings() })
-        addView(action("切换 Vault", false) { chooseVault() })
+        addView(iconAction(R.drawable.ic_search, "搜索笔记") { _ -> showSearch() })
+        addView(iconAction(R.drawable.ic_more, "更多选项") { anchor -> showBrowserMore(anchor) })
     }
 
     private fun browserFooter(): View = LinearLayout(this).apply {
@@ -438,6 +451,125 @@ class MainActivity : Activity() {
             marginEnd = dp(8)
         })
         addView(action("打开今日笔记", true) { openDailyNote() }, LinearLayout.LayoutParams(0, dp(48), 1.28f))
+    }
+
+    private fun showBrowserMore(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add("设置")
+            menu.add("切换 Vault")
+            setOnMenuItemClickListener { item ->
+                when (item.title) {
+                    "设置" -> showSettings()
+                    else -> chooseVault()
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    private fun showSearch() {
+        closeOpenSwipeRow(animated = false)
+        releaseEditor()
+        screen = Screen.SEARCH
+        val root = pageRoot(COLOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  文件", "搜索笔记") { showVaultBrowser() }, matchWrap())
+        val input = EditText(this).apply {
+            hint = "搜索标题、正文或标签"
+            setSingleLine(true)
+            setText(searchQuery)
+            setSelection(searchQuery.length)
+            contentDescription = "搜索标题、正文或标签"
+            setPadding(dp(20), dp(10), dp(20), dp(10))
+            background = rippleBackground(COLOR_ROW, dp(12))
+        }
+        root.addView(input, matchWrap().apply { leftMargin = dp(16); rightMargin = dp(16); topMargin = dp(8) })
+        val scroll = ScrollView(this).apply {
+            setOnScrollChangeListener { _, _, y, _, _ -> searchScrollY = y }
+        }
+        searchResultsView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(24))
+        }
+        scroll.addView(searchResultsView, matchWrap())
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+        scroll.post { scroll.scrollTo(0, searchScrollY) }
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(value: android.text.Editable?) {
+                searchQuery = value?.toString().orEmpty()
+                scheduleSearch()
+            }
+        })
+        renderSearchResults()
+        if (searchQuery.isNotBlank()) scheduleSearch()
+        if (searchResultFocus < 0) input.requestFocus()
+    }
+
+    private fun scheduleSearch() {
+        searchGeneration += 1L
+        handler.removeCallbacksAndMessages(searchDebounceToken)
+        val request = Runnable { runSearch() }
+        handler.postAtTime(request, searchDebounceToken, android.os.SystemClock.uptimeMillis() + 250L)
+    }
+
+    private fun runSearch() {
+        val query = searchQuery.trim()
+        val generation = searchGeneration
+        if (query.isEmpty()) {
+            searchResults = emptyList()
+            searchMessage = "输入标题、正文或标签"
+            renderSearchResults()
+            return
+        }
+        searchMessage = "正在搜索…"
+        renderSearchResults()
+        noteIoExecutor.execute {
+            val result = repository.searchNotes(query) { generation == searchGeneration && screen == Screen.SEARCH }
+            runOnUiThread {
+                if (screen != Screen.SEARCH || generation != searchGeneration || query != searchQuery.trim()) return@runOnUiThread
+                when (result) {
+                    is VaultSearchResult.Success -> {
+                        searchResults = result.hits
+                        searchMessage = when {
+                            result.hits.isEmpty() && result.unreadableCount > 0 -> "搜索不完整；${result.unreadableCount} 个文件无法读取"
+                            result.hits.isEmpty() -> "没有匹配的笔记"
+                            result.unreadableCount > 0 -> "找到 ${result.hits.size} 项；${result.unreadableCount} 个文件无法读取"
+                            else -> "找到 ${result.hits.size} 项"
+                        }
+                    }
+                    is VaultSearchResult.Failure -> {
+                        searchResults = emptyList()
+                        searchMessage = if (result.kind == VaultFailureKind.PERMISSION_DENIED) "无法访问当前 Vault，请重新选择" else "无法完整搜索当前 Vault，请稍后重试"
+                    }
+                    VaultSearchResult.Cancelled -> return@runOnUiThread
+                }
+                renderSearchResults()
+            }
+        }
+    }
+
+    private fun renderSearchResults() {
+        val content = searchResultsView ?: return
+        content.removeAllViews()
+        content.addView(TextView(this).apply {
+            text = searchMessage
+            textSize = 13f
+            setTextColor(COLOR_MUTED_TEXT)
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        }, matchWrap())
+        if (searchResults.isNotEmpty()) {
+            content.addView(vaultGroup(searchResults.mapIndexed { index, hit ->
+                val metadata = noteMetadata(hit.document, hit.match.snippet, hit.match.source)
+                vaultRow(R.drawable.ic_browser_note, hit.document.name.removeSuffix(".md"), metadata, "搜索结果") {
+                    openedFromSearch = true
+                    searchResultFocus = index
+                    openNote(hit.document)
+                }.also { row -> if (index == searchResultFocus) row.post { row.requestFocus() } }
+            }), matchWrap())
+        }
     }
 
     private fun showSettings() {
@@ -1115,6 +1247,7 @@ class MainActivity : Activity() {
     }
 
     private fun openDailyNote() {
+        openedFromSearch = false
         showNoteLoading(null, "正在打开今日笔记…")
         val generation = editorGeneration
         noteIoExecutor.execute {
@@ -1163,7 +1296,7 @@ class MainActivity : Activity() {
         screen = Screen.EDITOR_LOADING
         val root = pageRoot(COLOR_EDITOR_BACKGROUND)
         root.addView(simpleToolbar("‹  文件", note?.name?.removeSuffix(".md") ?: "今日笔记") {
-            showVaultBrowser()
+            if (openedFromSearch) showSearch() else showVaultBrowser()
         }, matchWrap())
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1198,7 +1331,7 @@ class MainActivity : Activity() {
         screen = Screen.EDITOR_ERROR
         val root = pageRoot(COLOR_EDITOR_BACKGROUND)
         root.addView(simpleToolbar("‹  文件", note?.name?.removeSuffix(".md") ?: "今日笔记") {
-            showVaultBrowser()
+            if (openedFromSearch) showSearch() else showVaultBrowser()
         }, matchWrap())
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1536,6 +1669,7 @@ class MainActivity : Activity() {
         MarkdownCodec.toHtml(content, repository::htmlAttachmentUrl, isNightTheme())
 
     private fun markdownToolbar(): View = HorizontalScrollView(this).apply {
+        formatActions.clear()
         isHorizontalScrollBarEnabled = false
         background = colorBlock(COLOR_SURFACE)
         setPadding(dp(12), dp(6), dp(12), dp(10))
@@ -1544,18 +1678,18 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(4), 0)
             background = rounded(COLOR_ROW, dp(24))
-            addView(formatIconAction(R.drawable.ic_editor_undo, "撤销") { applyEditorFormat("undo") })
-            addView(formatIconAction(R.drawable.ic_editor_redo, "重做") { applyEditorFormat("redo") })
-            addView(formatIconAction(R.drawable.ic_editor_heading, "标题格式") { showHeadingPicker() })
-            addView(formatIconAction(R.drawable.ic_editor_bold, "加粗") { applyEditorFormat("bold") })
-            addView(formatIconAction(R.drawable.ic_editor_italic, "斜体") { applyEditorFormat("italic") })
-            addView(formatIconAction(R.drawable.ic_editor_tag, "添加标签") { promptForTag() })
-            addView(formatIconAction(R.drawable.ic_editor_link, "添加链接") { promptForLink() })
-            addView(formatIconAction(R.drawable.ic_editor_table, "插入表格") { applyEditorFormat("table") })
+            addView(formatIconAction("undo", R.drawable.ic_editor_undo, "撤销") { applyEditorFormat("undo") })
+            addView(formatIconAction("redo", R.drawable.ic_editor_redo, "重做") { applyEditorFormat("redo") })
+            addView(formatIconAction("heading", R.drawable.ic_editor_heading, "标题格式") { showHeadingPicker() })
+            addView(formatIconAction("bold", R.drawable.ic_editor_bold, "加粗") { applyEditorFormat("bold") })
+            addView(formatIconAction("italic", R.drawable.ic_editor_italic, "斜体") { applyEditorFormat("italic") })
+            addView(formatIconAction("tag", R.drawable.ic_editor_tag, "添加标签") { promptForTag() })
+            addView(formatIconAction("link", R.drawable.ic_editor_link, "添加链接") { promptForLink() })
+            addView(formatIconAction("table", R.drawable.ic_editor_table, "插入表格") { applyEditorFormat("table") })
         }, LinearLayout.LayoutParams(-2, dp(44)))
     }
 
-    private fun formatIconAction(icon: Int, label: String, onClick: () -> Unit): ImageButton = ImageButton(this).apply {
+    private fun formatIconAction(key: String, icon: Int, label: String, onClick: () -> Unit): ImageButton = ImageButton(this).apply {
         setImageResource(icon)
         setColorFilter(COLOR_PRIMARY_TEXT)
         scaleType = android.widget.ImageView.ScaleType.CENTER
@@ -1574,6 +1708,27 @@ class MainActivity : Activity() {
         contentDescription = label
         tooltipText = label
         setOnClickListener { onClick() }
+        formatActions[key] = this
+        if (key == "undo" || key == "redo") {
+            isEnabled = false
+            alpha = 0.42f
+        }
+    }
+
+    private fun updateFormatActionState(key: String, selected: Boolean, enabled: Boolean = true) {
+        val action = formatActions[key] ?: return
+        action.isEnabled = enabled
+        action.isSelected = selected
+        action.alpha = if (enabled) 1f else 0.42f
+        action.setColorFilter(if (selected) COLOR_ON_ACCENT else COLOR_PRIMARY_TEXT)
+        action.background = rippleBackground(if (selected) COLOR_ACCENT else COLOR_ROW, dp(22))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            action.stateDescription = when {
+                !enabled -> "不可用"
+                selected -> "已启用"
+                else -> "未启用"
+            }
+        }
     }
 
     private fun applyEditorFormat(command: String, value: String? = null) {
@@ -1648,7 +1803,9 @@ class MainActivity : Activity() {
 
     private fun returnToBrowser() {
         saveCurrentNote { success ->
-            if (success) showVaultBrowser() else toast("保存失败，请先恢复 Vault 访问权限")
+            if (success) {
+                if (openedFromSearch) showSearch() else showVaultBrowser()
+            } else toast("保存失败，请先恢复 Vault 访问权限")
         }
     }
 
@@ -2055,6 +2212,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 currentNote = refreshed
                 pendingEditorScrollY = session.scrollY
+                pendingCaretLinkPath = relativePath
                 pendingVideoSession = null
                 videoMetadata = null
                 videoStatusView = null
@@ -2271,13 +2429,21 @@ class MainActivity : Activity() {
             super.onPageFinished(view, url)
             val scrollY = pendingEditorScrollY
             val imagePath = pendingCaretImagePath
+            val linkPath = pendingCaretLinkPath
             pendingEditorScrollY = null
             pendingCaretImagePath = null
+            pendingCaretLinkPath = null
             view?.post {
                 if (scrollY != null) view.scrollTo(0, scrollY)
                 if (imagePath != null) {
                     view.evaluateJavascript(
                         "window.markbook && window.markbook.focusAfterImage(${org.json.JSONObject.quote(imagePath)})",
+                        null
+                    )
+                }
+                if (linkPath != null) {
+                    view.evaluateJavascript(
+                        "window.markbook && window.markbook.focusAfterLink(${org.json.JSONObject.quote(linkPath)})",
                         null
                     )
                 }
@@ -2314,6 +2480,19 @@ class MainActivity : Activity() {
                 updateSaveStatus()
                 handler.removeCallbacks(autosave)
                 handler.postDelayed(autosave, AUTOSAVE_DELAY_MS)
+            }
+        }
+
+        @JavascriptInterface
+        fun onFormatState(value: String) {
+            handler.post {
+                if (screen != Screen.EDITOR) return@post
+                val state = runCatching { org.json.JSONObject(value) }.getOrNull() ?: return@post
+                updateFormatActionState("undo", false, state.optBoolean("undo"))
+                updateFormatActionState("redo", false, state.optBoolean("redo"))
+                updateFormatActionState("heading", state.optBoolean("heading"))
+                updateFormatActionState("bold", state.optBoolean("bold"))
+                updateFormatActionState("italic", state.optBoolean("italic"))
             }
         }
 
@@ -2390,7 +2569,24 @@ class MainActivity : Activity() {
 
     private fun editorContext(note: VaultDocument): String {
         val location = note.parentRelativePath.ifBlank { "Vault 根目录" }
-        return "$currentVaultName · $location · ${note.name}"
+        return "$currentVaultName · $location"
+    }
+
+    private fun noteMetadata(
+        note: VaultDocument,
+        preview: String,
+        source: VaultSearchSource? = null
+    ): String {
+        val today = SimpleDateFormat("yyyy-MM-dd'.md'", Locale.US).format(Date())
+        val daily = if (VaultSearchPolicy.isDailyNote(note.relativePath, repository.dailyNoteDirectoryPath(), today)) "今日笔记" else null
+        val time = VaultSearchPolicy.relativeTime(note.lastModified, System.currentTimeMillis())
+        val sourceLabel = when (source) {
+            VaultSearchSource.FILENAME -> "标题匹配"
+            VaultSearchSource.TAG -> "标签匹配"
+            VaultSearchSource.BODY -> "正文匹配"
+            null -> null
+        }
+        return listOfNotNull(daily, time, sourceLabel, preview.takeIf { it.isNotBlank() }).joinToString(" · ")
     }
 
     private fun swipeDiscoveryHint(): View = LinearLayout(this).apply {
@@ -2685,6 +2881,20 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
+    private fun iconAction(icon: Int, label: String, onClick: (View) -> Unit): ImageButton = ImageButton(this).apply {
+        setImageResource(icon)
+        setColorFilter(COLOR_PRIMARY_TEXT)
+        scaleType = android.widget.ImageView.ScaleType.CENTER
+        minimumWidth = dp(44)
+        minimumHeight = dp(44)
+        background = rippleBackground(COLOR_ROW, dp(12))
+        isClickable = true
+        isFocusable = true
+        contentDescription = label
+        tooltipText = label
+        setOnClickListener { onClick(this) }
+    }
+
     private fun isInternalDocument(document: VaultDocument): Boolean {
         val leaf = document.relativePath.substringAfterLast('/')
         return VaultPathPolicy.isProtected(document.relativePath) || leaf.startsWith(".markbook-")
@@ -2808,7 +3018,7 @@ class MainActivity : Activity() {
         get() = if (isNightTheme()) Color.rgb(190, 82, 74) else Color.rgb(176, 54, 47)
 
     private enum class Screen {
-        WELCOME, BROWSER, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, VIDEO, SETTINGS, DAILY_FOLDER_PICKER,
+        WELCOME, BROWSER, SEARCH, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, VIDEO, SETTINGS, DAILY_FOLDER_PICKER,
         DRIVE_SETUP, DRIVE_FOLDER_PICKER, DRIVE_CONFIRM, DRIVE_DETAILS
     }
 
