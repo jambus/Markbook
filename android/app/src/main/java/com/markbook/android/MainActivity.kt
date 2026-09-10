@@ -85,6 +85,11 @@ class MainActivity : Activity() {
     private var trashStatusView: TextView? = null
     private var trashRowView: View? = null
     private var trashLoadGeneration = 0L
+    private var trashBrowserGeneration = 0L
+    private var trashBrowserScrollY = 0
+    private var trashDocuments: List<VaultDocument> = emptyList()
+    private var trashBrowserMessage: String? = null
+    private var trashMutationPending = false
     private var captureFile: File? = null
     private var captureUri: Uri? = null
     private var editorView: PhotoEditorView? = null
@@ -172,6 +177,8 @@ class MainActivity : Activity() {
             Screen.PHOTO -> restoreEditorScreen()
             Screen.VIDEO -> cancelVideoCapture()
             Screen.SETTINGS -> showVaultBrowser()
+            Screen.TRASH -> showSettings()
+            Screen.TRASH_VIEWER -> showTrashBrowser()
             Screen.DAILY_FOLDER_PICKER -> showSettings()
             Screen.DRIVE_SETUP, Screen.DRIVE_DETAILS -> showSettings()
             Screen.DRIVE_FOLDER_PICKER, Screen.DRIVE_CONFIRM -> showDriveSetup()
@@ -668,16 +675,12 @@ class MainActivity : Activity() {
         isClickable = true
         isFocusable = true
         setOnClickListener {
-            when {
-                trashClearPending -> Unit
-                trashLoadFailed -> loadTrashStatus()
-                (trashCount ?: 0) > 0 -> confirmEmptyTrash()
-            }
+            if (!trashClearPending) showTrashBrowser()
         }
         addView(LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply {
-                text = "清空回收站"
+                text = "回收站"
                 textSize = 16f
                 setTextColor(COLOR_PRIMARY_TEXT)
             }, matchWrap())
@@ -733,48 +736,118 @@ class MainActivity : Activity() {
             else -> "${trashCount} 个项目 · 图片附件不会删除"
         }
         trashStatusView?.text = status
-        val enabled = !trashClearPending && (trashLoadFailed || (trashCount ?: 0) > 0)
+        val enabled = !trashClearPending
         trashRowView?.isEnabled = enabled
         trashRowView?.alpha = if (enabled) 1f else 0.62f
-        trashRowView?.contentDescription = "清空回收站，$status"
+        trashRowView?.contentDescription = "回收站，$status"
     }
 
-    private fun confirmEmptyTrash() {
-        val count = trashCount ?: return
-        if (count <= 0 || trashClearPending) return
-        dialogBuilder()
-            .setTitle("永久清空回收站？")
-            .setMessage(
-                "将永久删除当前 Vault/.trash 中的 $count 个项目。此操作无法撤销。" +
-                    "图片附件不会被删除。"
-            )
-            .setNegativeButton("取消", null)
-            .setPositiveButton("永久删除") { _, _ -> emptyTrash() }
-            .show()
-    }
-
-    private fun emptyTrash() {
-        if (trashClearPending) return
-        trashClearPending = true
-        trashStatusMessage = null
-        updateTrashRow()
+    private fun showTrashBrowser(completionMessage: String? = null) {
+        releaseEditor()
+        screen = Screen.TRASH
+        val generation = ++trashBrowserGeneration
+        val root = pageRoot(COLOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  设置", "回收站") { showSettings() }, matchWrap())
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(20)) }
+        content.addView(emptyState("正在读取回收站…"), matchWrap())
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
         noteIoExecutor.execute {
-            val result = repository.emptyTrash()
+            val result = repository.trashDocuments()
             runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                trashClearPending = false
-                trashCount = if (result.failed > 0) {
-                    result.remaining.coerceAtLeast(result.failed)
-                } else {
-                    result.remaining
+                if (screen != Screen.TRASH || generation != trashBrowserGeneration) return@runOnUiThread
+                when (result) {
+                    is TrashDocumentsResult.Success -> { trashDocuments = result.documents; trashBrowserMessage = completionMessage }
+                    is TrashDocumentsResult.Failure -> { trashDocuments = emptyList(); trashBrowserMessage = if (result.kind == VaultFailureKind.PERMISSION_DENIED) "无法访问回收站，请重新选择 Vault" else "无法读取回收站，点按重试" }
                 }
-                trashLoadFailed = false
-                trashStatusMessage = when {
+                renderTrashBrowser()
+            }
+        }
+    }
+
+    private fun renderTrashBrowser() {
+        val root = pageRoot(COLOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  设置", "回收站") { showSettings() }, matchWrap())
+        val scroll = ScrollView(this).apply { setOnScrollChangeListener { _, _, y, _, _ -> trashBrowserScrollY = y } }
+        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(20)) }
+        val message = trashBrowserMessage
+        if (message != null) {
+            content.addView(infoBanner(message), matchWrap())
+            if (trashDocuments.isEmpty() && message.contains("重试")) content.addView(action("重新读取", true) { showTrashBrowser() }, matchWrap().apply { topMargin = dp(8) })
+            if (trashDocuments.isEmpty() && message.contains("重新选择")) content.addView(action("重新选择 Vault", true) { chooseVault() }, matchWrap().apply { topMargin = dp(8) })
+        }
+        if (trashDocuments.isEmpty() && message == null) {
+            content.addView(emptyState("回收站为空。移到回收站的笔记和文件夹会显示在这里。"), matchWrap())
+        } else if (trashDocuments.isNotEmpty() && !trashMutationPending) {
+            content.addView(infoBanner("仅显示 Vault 根 .trash 的直接项目。附件不会随永久删除而删除。"), matchWrap().apply { bottomMargin = dp(8) })
+            content.addView(vaultGroup(trashDocuments.map { document ->
+                val subtitle = if (repository.isDirectory(document)) "文件夹 · 永久删除会移除其中全部内容" else "来自回收站 · ${document.name}"
+                vaultRow(if (repository.isDirectory(document)) R.drawable.ic_browser_folder else R.drawable.ic_browser_note, document.name.removeSuffix(".md"), subtitle, "回收站项目", trailingAccessibilityLabel = "永久删除 ${document.name}", trailingIcon = R.drawable.ic_note_delete, trailingAction = { confirmDeleteTrashItem(document) }) {
+                    if (!repository.isDirectory(document) && document.name.endsWith(".md", true)) showTrashViewer(document)
+                    else confirmDeleteTrashItem(document)
+                }
+            }), matchWrap())
+            content.addView(action("清空回收站（${trashDocuments.size}）", true) { confirmDeleteTrashSnapshot(trashDocuments) }, matchWrap().apply { topMargin = dp(16) })
+        }
+        scroll.addView(content, matchWrap())
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+        scroll.post { scroll.scrollTo(0, trashBrowserScrollY) }
+    }
+
+    private fun confirmDeleteTrashItem(document: VaultDocument) {
+        if (trashMutationPending) return
+        val folder = repository.isDirectory(document)
+        dialogBuilder().setTitle("永久删除“${document.name}”？").setMessage(
+            "此操作无法撤销。${if (folder) "文件夹及其中全部内容将被永久删除。" else ""}图片附件不会删除，Markdown 链接不会改写。"
+        ).setNegativeButton("取消", null).setPositiveButton("永久删除") { _, _ -> deleteTrashSnapshot(listOf(document)) }.show()
+    }
+
+    private fun confirmDeleteTrashSnapshot(snapshot: List<VaultDocument>) {
+        if (trashMutationPending) return
+        dialogBuilder().setTitle("永久清空回收站？").setMessage(
+            "将永久删除当前 Vault/.trash 中已列出的 ${snapshot.size} 个直接项目。此操作无法撤销；文件夹内容也会删除，图片附件不会删除。"
+        ).setNegativeButton("取消", null).setPositiveButton("永久删除") { _, _ -> deleteTrashSnapshot(snapshot) }.show()
+    }
+
+    private fun deleteTrashSnapshot(snapshot: List<VaultDocument>) {
+        if (trashMutationPending) return
+        val confirmed = snapshot.map { it.uri.toString() }
+        val generation = trashBrowserGeneration
+        trashMutationPending = true
+        trashBrowserMessage = "正在永久删除…"
+        renderTrashBrowser()
+        noteIoExecutor.execute {
+            val result = repository.deleteTrashSnapshot(confirmed)
+            runOnUiThread {
+                trashMutationPending = false
+                if (screen != Screen.TRASH || generation != trashBrowserGeneration) return@runOnUiThread
+                val message = when {
                     result.failed == 0 -> "已永久删除 ${result.deleted} 个项目"
-                    result.deleted > 0 -> "已删除 ${result.deleted} 个，${result.failed} 个失败 · 点按重试"
-                    else -> "删除失败，${result.remaining.coerceAtLeast(result.failed)} 个项目仍保留 · 点按重试"
+                    else -> "已删除 ${result.deleted} 个，${result.failed} 个失败；可重新确认重试"
                 }
-                if (screen == Screen.SETTINGS) updateTrashRow()
+                showTrashBrowser(message)
+            }
+        }
+    }
+
+    private fun showTrashViewer(document: VaultDocument) {
+        screen = Screen.TRASH_VIEWER
+        val root = pageRoot(COLOR_EDITOR_BACKGROUND)
+        root.addView(simpleToolbar("‹  回收站", document.name.removeSuffix(".md")) { showTrashBrowser() }, matchWrap())
+        root.addView(TextView(this).apply { text = "来自回收站 · 只读"; textSize = 13f; setTextColor(COLOR_MUTED_TEXT); setPadding(dp(20), dp(8), dp(20), dp(8)) }, matchWrap())
+        root.addView(TextView(this).apply { text = "正在读取笔记…"; gravity = Gravity.CENTER; setTextColor(COLOR_SECONDARY_TEXT) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
+        noteIoExecutor.execute {
+            val content = repository.readText(document)
+            runOnUiThread {
+                if (screen != Screen.TRASH_VIEWER) return@runOnUiThread
+                val view = TextView(this).apply { text = content ?: "无法读取此回收站笔记"; textSize = 17f; setTextColor(COLOR_PRIMARY_TEXT); setPadding(dp(20), dp(12), dp(20), dp(32)); setTextIsSelectable(true) }
+                val page = pageRoot(COLOR_EDITOR_BACKGROUND)
+                page.addView(simpleToolbar("‹  回收站", document.name.removeSuffix(".md")) { showTrashBrowser() }, matchWrap())
+                page.addView(TextView(this).apply { text = "来自回收站 · 只读"; textSize = 13f; setTextColor(COLOR_MUTED_TEXT); setPadding(dp(20), dp(8), dp(20), dp(8)) }, matchWrap())
+                page.addView(ScrollView(this).apply { addView(view) }, LinearLayout.LayoutParams(-1, 0, 1f))
+                setContentView(page)
             }
         }
     }
@@ -2631,6 +2704,8 @@ class MainActivity : Activity() {
         subtitle: String,
         itemType: String = "",
         trailingLabel: String = "",
+        trailingAccessibilityLabel: String = trailingLabel,
+        trailingIcon: Int? = null,
         trailingAction: (() -> Unit)? = null,
         grouped: Boolean = false,
         action: () -> Unit
@@ -2675,7 +2750,11 @@ class MainActivity : Activity() {
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }, LinearLayout.LayoutParams(dp(28), dp(44)))
         } else {
-            addView(action(trailingLabel, false, trailingAction), LinearLayout.LayoutParams(dp(56), dp(44)))
+            if (trailingIcon != null) {
+                addView(iconAction(trailingIcon, trailingAccessibilityLabel) { trailingAction() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            } else {
+                addView(action(trailingAccessibilityLabel, false, trailingAction).apply { text = trailingLabel }, wrapWrap())
+            }
         }
     }
 
@@ -3018,7 +3097,7 @@ class MainActivity : Activity() {
         get() = if (isNightTheme()) Color.rgb(190, 82, 74) else Color.rgb(176, 54, 47)
 
     private enum class Screen {
-        WELCOME, BROWSER, SEARCH, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, VIDEO, SETTINGS, DAILY_FOLDER_PICKER,
+        WELCOME, BROWSER, SEARCH, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, VIDEO, SETTINGS, TRASH, TRASH_VIEWER, DAILY_FOLDER_PICKER,
         DRIVE_SETUP, DRIVE_FOLDER_PICKER, DRIVE_CONFIRM, DRIVE_DETAILS
     }
 

@@ -79,6 +79,11 @@ sealed class TrashContentsResult {
     data class Failure(val kind: VaultFailureKind) : TrashContentsResult()
 }
 
+sealed class TrashDocumentsResult {
+    data class Success(val documents: List<VaultDocument>) : TrashDocumentsResult()
+    data class Failure(val kind: VaultFailureKind) : TrashDocumentsResult()
+}
+
 data class TrashClearResult(
     val deleted: Int,
     val failed: Int,
@@ -514,32 +519,46 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         }
     }
 
-    /** Permanently deletes only the direct children of the Vault-root .trash directory. */
-    fun emptyTrash(): TrashClearResult {
-        val tree = savedVaultUri() ?: return TrashClearResult(0, 1, 0)
+    fun trashDocuments(): TrashDocumentsResult {
         return try {
+            val tree = savedVaultUri() ?: return TrashDocumentsResult.Failure(VaultFailureKind.PERMISSION_DENIED)
             val trash = findChildStrict(tree, rootDocument(tree), ".trash")
-                ?: return TrashClearResult(0, 0, 0)
-            val children = listChildrenStrict(tree, trash.uri)
-            val counter = TrashClearCounter()
-            children.forEach { document ->
-                val success = try {
-                    DocumentsContract.deleteDocument(resolver, document.uri)
-                } catch (_: Exception) {
-                    false
-                }
-                counter.record(success)
-            }
-            val remaining = try {
-                listChildrenStrict(tree, trash.uri).size
-            } catch (_: Exception) {
-                children.size
-            }
-            counter.result(remaining)
+                ?: return TrashDocumentsResult.Success(emptyList())
+            TrashDocumentsResult.Success(listChildrenStrict(tree, trash.uri, ".trash").sortedWith(
+                compareBy<VaultDocument> { !isDirectory(it) }.thenBy { it.name.lowercase() }
+            ))
+        } catch (_: SecurityException) {
+            TrashDocumentsResult.Failure(VaultFailureKind.PERMISSION_DENIED)
         } catch (_: Exception) {
-            TrashClearResult(0, 1, 0)
+            TrashDocumentsResult.Failure(VaultFailureKind.READ_FAILED)
         }
     }
+
+    /** Deletes only direct children whose immutable URI snapshot was confirmed by the user. */
+    fun deleteTrashSnapshot(confirmedUris: Collection<String>): TrashClearResult {
+        if (confirmedUris.isEmpty()) return TrashClearResult(0, 0, trashContentsCount())
+        return try {
+            val tree = savedVaultUri() ?: return TrashClearResult(0, confirmedUris.size, 0)
+            val trash = findChildStrict(tree, rootDocument(tree), ".trash")
+                ?: return TrashClearResult(0, confirmedUris.size, 0)
+            val direct = listChildrenStrict(tree, trash.uri, ".trash")
+            val directIds = direct.map { it.uri.toString() }
+            val targets = TrashSnapshotPolicy.targets(confirmedUris, directIds)
+            var deleted = 0
+            var failed = TrashSnapshotPolicy.missingCount(confirmedUris, directIds)
+            targets.forEach { id ->
+                val item = direct.firstOrNull { it.uri.toString() == id }
+                val didDelete = try { item != null && DocumentsContract.deleteDocument(resolver, item.uri) } catch (_: Exception) { false }
+                if (didDelete) deleted++ else failed++
+            }
+            val remaining = try { listChildrenStrict(tree, trash.uri, ".trash").size } catch (_: Exception) { failed.coerceAtLeast(0) }
+            TrashClearResult(deleted, failed, remaining)
+        } catch (_: Exception) {
+            TrashClearResult(0, confirmedUris.size, trashContentsCount())
+        }
+    }
+
+    private fun trashContentsCount(): Int = (trashDocuments() as? TrashDocumentsResult.Success)?.documents?.size ?: 0
 
     fun savePhotoPair(
         noteName: String,

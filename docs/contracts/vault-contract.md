@@ -13,7 +13,7 @@ source of truth; neither client creates a second Vault or a required database.
 ├── assets/<note-file-stem>/<HHmmss>-<xxxx>-c.<ext>
 ├── assets/<note-file-stem>/<HHmmss>-<xxxx>-v.{mp4|3gp}
 ├── attachments/                         # legacy, read-only compatibility
-├── .trash/                              # local-only deleted notes
+├── .trash/                              # local-only deleted notes and folders
 └── .markbook/
     └── conflicts/
 ```
@@ -98,12 +98,16 @@ replays the insertion. A provider result that returns null or throws after final
 as unknown and keeps its marker. MP4/3GP acceptance requires a recognized container signature plus
 a video track; an output filename or Provider MIME alone is insufficient.
 
-Deletes move notes into `.trash/`; this directory is excluded from remote sync.
+Deletes move notes and folders into `.trash/`; this directory is excluded from remote sync.
 Permanent deletion is a separate explicit operation. Attachments are retained until a later
 explicit cleanup flow, because they may still be referenced by another note.
 “Clear trash” permanently deletes only the current contents directly below the Vault-root
-`.trash/` after explicit user confirmation. It does not delete `assets/` or `attachments/`, and a
-partial failure leaves every undeleted item in place for a later retry.
+`.trash/` after explicit user confirmation. The recycle-bin browser lists only direct children;
+Markdown may be inspected read-only, but no in-app restore is implied. Single-item and clear
+deletion use the immutable direct-child snapshot shown at confirmation time, so newly added items
+remain for a later confirmation. Folders use one Provider whole-folder deletion, never recursive
+child deletion. It does not delete `assets/` or `attachments/`, and a partial failure leaves every
+undeleted item in place for a later retry.
 When both sides changed the same path, keep both versions under
 `.markbook/conflicts/` or with a deterministic `冲突-<device>-<timestamp>` suffix.
 No client silently overwrites the other version.
