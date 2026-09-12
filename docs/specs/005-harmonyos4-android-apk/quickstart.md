@@ -8,6 +8,15 @@
 - 使用 Java 11+ 从 `android/` 执行 `./gradlew :app:testDebugUnitTest :app:assembleDebug`。
 - 待安装 APK 为 `android/app/build/outputs/apk/debug/app-debug.apk`。
 
+本机命令行打包必须显式使用 DevEco JBR 与 Android SDK，避免 `ANDROID_HOME` 未设置：
+
+```bash
+cd android
+JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home \
+ANDROID_HOME="$HOME/Library/Android/sdk" \
+./gradlew :app:clean :app:assembleDebug
+```
+
 连接设备后可运行 `./scripts/install-apk.sh` 自动选择 `adb` 或 `hdc` 安装 APK。
 若脚本提示 `connect-key`，先在手机确认调试密钥，再重新执行，不要跳过授权继续验收。
 

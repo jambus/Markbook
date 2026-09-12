@@ -1,8 +1,8 @@
 # 禾记（Heji Notes） Constitution
 
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Ratified**: 2026-07-24
-**Last amended**: 2026-07-28
+**Last amended**: 2026-09-13
 
 ## I. 本地文件是唯一事实源
 
@@ -34,6 +34,11 @@ Android 或 HarmonyOS 提供的系统安全存储，或仅在当前进程内短�
 
 纯逻辑分别使用 Android 单测与 Hypium 单测；文件、相机、后台和网络能力必须在
 对应真实设备和系统版本验证。每个规格的验收场景通过后才能标记完成。
+
+任何可执行代码、资源、manifest、构建配置或运行时依赖的变更，交付前都必须重新打包
+受影响客户端：Android 改动运行 `:app:testDebugUnitTest :app:assembleDebug`，HAP 改动运行
+`./scripts/build-hap.sh`，共享运行时改动两端都运行。仅文档变更不要求打包；环境不可用时
+必须记录阻断原因，禁止将旧产物描述为本次变更的构建结果。
 
 ## Governance
 

@@ -29,11 +29,13 @@ Android APK 与 HarmonyOS HAP 分别维护安装包版本；两端共享 Vault �
 - 标识迁移会被系统视为新应用，旧版不能覆盖安装；用户首次启动需重新选择原 Vault，并重新连接 Google Drive 或 OneDrive。
 - Vault 本身无需转换：既有 Markdown、相对附件链接、`.markbook/` 元数据和 `.markbook-*` 恢复标记继续保持原样。同步的既有远端目录也不自动改名。
 - Google Cloud Console 必须为 `com.jambus.heji` 和发行签名 SHA-1 新建或更新 OAuth Android 客户端；未完成前 Google Drive 登录不能视为已验收。
+- 交付约束：任何可执行代码、资源或构建配置更新后，必须重新打包受影响客户端；跨端运行时改动必须同时重新打包 APK 与 HAP，不能复用旧产物。
 
 ### 当前验证
 
 - HAP 已通过 `./scripts/build-hap.sh` 构建；现有 ArkTS 异常处理与弃用 API 警告不由本次改名引入。
-- 待执行 Android 单测、debug APK 构建，以及 Mate 60 上的新安装、Vault 重新选择、云端重新授权和既有 Vault 互操作验证。
+- Android 已使用 DevEco JBR 与 `~/Library/Android/sdk` 运行单测和重新打包；`app-debug.apk` 已确认包含 `com.jambus.heji`、`0.5.0` 与 `versionCode 9`。Android Gradle Plugin 对 `compileSdk 34` 发出兼容性警告，但构建与测试通过。
+- 待执行 Mate 60 上的新安装、Vault 重新选择、云端重新授权和既有 Vault 互操作验证。
 
 ## 0.4.0 — 原 Markbook 当前开发版本
 

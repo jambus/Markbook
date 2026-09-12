@@ -115,6 +115,17 @@ platform spec and acceptance record, Android `versionName`, and monotonically
 increasing `versionCode`. Do not mark a development baseline as released before
 its required Mate real-device checks are recorded.
 
+## Packaging Gate
+
+Every change to executable code, resources, manifests, build configuration, or
+runtime dependencies must be followed by a fresh package build before handoff.
+Changes under `android/` require `./gradlew :app:testDebugUnitTest :app:assembleDebug`
+from `android/`; changes under `AppScope/` or `entry/` require
+`./scripts/build-hap.sh`. Changes that affect both clients or their shared
+runtime contract require both builds. Documentation-only changes do not require
+packaging. Report an unavailable build environment as blocked evidence; never
+reuse or describe an older artifact as the result of the current change.
+
 ## Build, Test, and Development Commands
 
 Prioritize the Android APK defined by spec `005`; use the existing Gradle Wrapper
@@ -129,6 +140,16 @@ installed SDK for the HarmonyOS 5/6 HAP.
   Android unit tests and builds the debug APK.
 - `./scripts/install-apk.sh` installs the generated APK using an available
   `adb` or `hdc` connection after the device authorizes the debugging key.
+
+On this host, use the DevEco JBR and installed Android SDK explicitly to avoid
+an `ANDROID_HOME` lookup failure:
+
+```bash
+cd android
+JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home \
+ANDROID_HOME="$HOME/Library/Android/sdk" \
+./gradlew :app:clean :app:assembleDebug
+```
 
 DevEco Studio supplies Node and Hvigor. Do not commit `.hvigor/`, `oh_modules/`,
 signed HAPs, or local SDK paths. For CLI builds, `DEVECO_SDK_HOME` must be an
