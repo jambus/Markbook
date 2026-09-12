@@ -52,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var driveAuth: GoogleDriveAuth
     private val driveExecutor = Executors.newSingleThreadExecutor()
     private val noteIoExecutor = Executors.newSingleThreadExecutor()
+    private val structuralIoExecutor = Executors.newSingleThreadExecutor()
     private var webView: WebView? = null
     private var statusView: TextView? = null
     private var saveActionView: TextView? = null
@@ -72,6 +73,7 @@ class MainActivity : Activity() {
     private var browserLoadGeneration = 0L
     private var browserMutationPending = false
     private var browserMutationMessage: String? = null
+    private var browserSnapshot: BrowserSnapshot? = null
     private var openSwipeRow: SwipeActionRow? = null
     private var swipeDismissTouch: SwipeDismissTouchPolicy.State? = null
     private var dailyFolderDirectory: VaultDocument? = null
@@ -143,6 +145,8 @@ class MainActivity : Activity() {
         handler.removeCallbacks(autosave)
         driveExecutor.shutdownNow()
         noteIoExecutor.shutdownNow()
+        // Never interrupt an already-confirmed structural mutation; its repository lease cleans up in finally.
+        structuralIoExecutor.shutdown()
         releaseEditor()
         super.onDestroy()
     }
@@ -371,6 +375,7 @@ class MainActivity : Activity() {
         children: List<VaultDocument>,
         previews: Map<String, String>
     ) {
+        browserSnapshot = BrowserSnapshot(rootDirectory, directoryReadable, children, previews)
         val root = pageRoot(COLOR_BACKGROUND)
         root.addView(browserHeader(), matchWrap())
         root.addView(TextView(this).apply {
@@ -441,6 +446,45 @@ class MainActivity : Activity() {
         if (directoryReadable) root.addView(browserFooter(), matchWrap())
         setContentView(root)
         scroll.post { scroll.scrollTo(0, browserScrollY) }
+    }
+
+    /** Removes a confirmed move immediately; the provider directory is reconciled asynchronously. */
+    private fun renderBrowserAfterConfirmedMove(document: VaultDocument) {
+        val snapshot = browserSnapshot ?: return
+        val remaining = snapshot.children.filterNot { it.uri == document.uri }
+        val remainingPreviews = snapshot.previews.filterKeys { key -> remaining.any { it.uri.toString() == key } }
+        renderVaultBrowser(snapshot.rootDirectory, snapshot.directoryReadable, remaining, remainingPreviews)
+    }
+
+    private fun refreshVaultBrowserAfterMove() {
+        val requestedDirectory = browserDirectory ?: return
+        val generation = ++browserLoadGeneration
+        noteIoExecutor.execute {
+            try {
+                val rootDirectory = repository.vaultRoot() ?: throw IllegalStateException("Vault unavailable")
+                if (!repository.canReadDirectory(requestedDirectory)) throw IllegalStateException("Directory unreadable")
+                val directoryReadable = true
+                val children = repository.verifiedChildren(requestedDirectory)
+                    .filterNot { isInternalDocument(it) }
+                    .sortedWith(compareBy<VaultDocument> { !repository.isDirectory(it) }.thenBy { it.name.lowercase() })
+                val previews = children
+                    .filter { !repository.isDirectory(it) && it.name.endsWith(".md", true) }
+                    .associate { it.uri.toString() to notePreview(it) }
+                runOnUiThread {
+                    if (!browserRequestIsCurrent(generation)) return@runOnUiThread
+                    browserMutationMessage = null
+                    renderVaultBrowser(rootDirectory, directoryReadable, children, previews)
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (!browserRequestIsCurrent(generation)) return@runOnUiThread
+                    browserMutationMessage = "已移到回收站，但列表刷新失败。请返回文件库后重试。"
+                    browserSnapshot?.let { snapshot ->
+                        renderVaultBrowser(snapshot.rootDirectory, snapshot.directoryReadable, snapshot.children, snapshot.previews)
+                    }
+                }
+            }
+        }
     }
 
     private fun browserHeader(): View = LinearLayout(this).apply {
@@ -1494,7 +1538,7 @@ class MainActivity : Activity() {
                         browserMutationPending = true
                         val generation = browserLoadGeneration
                         val requestedName = input.text.toString()
-                        noteIoExecutor.execute {
+                        structuralIoExecutor.execute {
                             val result = runStructuralMutation {
                                 if (kind == VaultEntryKind.NOTE) repository.createNote(parent, requestedName)
                                 else repository.createFolder(parent, requestedName)
@@ -1686,7 +1730,7 @@ class MainActivity : Activity() {
                     .setMessage("正在检查引用并更新 Vault；请勿重复操作。").create()
                 progress.setCancelable(false)
                 progress.show()
-                noteIoExecutor.execute {
+                structuralIoExecutor.execute {
                     val vaultId = repository.savedVaultUri()?.toString().orEmpty()
                     val lease = VaultMutationLease.tryAcquire(vaultId, VaultMutationLease.Kind.STRUCTURAL)
                     val result = if (lease == null) {
@@ -1740,7 +1784,7 @@ class MainActivity : Activity() {
                         browserMutationPending = true
                         val generation = browserLoadGeneration
                         val requestedName = input.text.toString()
-                        noteIoExecutor.execute {
+                        structuralIoExecutor.execute {
                             val result = runStructuralMutation { repository.rename(document, requestedName) }
                             runOnUiThread {
                                 if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
@@ -1786,7 +1830,11 @@ class MainActivity : Activity() {
                 progress.setCancelable(false)
                 progress.setCanceledOnTouchOutside(false)
                 progress.show()
-                noteIoExecutor.execute {
+                progress.setMessage("等待前序文件操作…")
+                structuralIoExecutor.execute {
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) progress.setMessage("正在移到回收站…")
+                    }
                     val result = runStructuralMutation { repository.moveToTrash(document) }
                     runOnUiThread {
                         progress.dismiss()
@@ -1794,8 +1842,10 @@ class MainActivity : Activity() {
                         browserMutationPending = false
                         when (result) {
                             is VaultMutationResult.Success -> {
+                                browserMutationMessage = "已移到回收站，正在后台刷新列表…"
+                                renderBrowserAfterConfirmedMove(document)
                                 toast(dailyDirectoryChangeMessage(result.dailyDirectoryChange) ?: "已移到回收站")
-                                showVaultBrowser()
+                                refreshVaultBrowserAfterMove()
                             }
                             is VaultMutationResult.Failure -> {
                                 browserMutationMessage = "移动未完成，源文件未改动。请左滑该条目后重试，或长按打开操作菜单。\n${mutationFailureMessage(result)}"
@@ -3298,6 +3348,13 @@ class MainActivity : Activity() {
         WELCOME, BROWSER, SEARCH, EDITOR_LOADING, EDITOR_ERROR, EDITOR, PHOTO, VIDEO, SETTINGS, TRASH, TRASH_VIEWER, DAILY_FOLDER_PICKER,
         DRIVE_SETUP, DRIVE_FOLDER_PICKER, DRIVE_CONFIRM, DRIVE_DETAILS
     }
+
+    private data class BrowserSnapshot(
+        val rootDirectory: VaultDocument,
+        val directoryReadable: Boolean,
+        val children: List<VaultDocument>,
+        val previews: Map<String, String>
+    )
 
     companion object {
         private const val VAULT_REQUEST = 1002

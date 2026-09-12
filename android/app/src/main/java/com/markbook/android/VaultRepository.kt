@@ -194,6 +194,12 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         return listChildren(tree, directory.uri, directory.relativePath)
     }
 
+    /** Used when an optimistic UI result must distinguish an unreadable directory from an empty one. */
+    fun verifiedChildren(directory: VaultDocument): List<VaultDocument> {
+        val tree = savedVaultUri() ?: throw IllegalStateException("Vault unavailable")
+        return listChildrenStrict(tree, directory.uri, directory.relativePath)
+    }
+
     /** All user-manageable directories, for a same-Vault note-move destination picker. */
     fun directories(): List<VaultDocument> {
         val tree = savedVaultUri() ?: return emptyList()
