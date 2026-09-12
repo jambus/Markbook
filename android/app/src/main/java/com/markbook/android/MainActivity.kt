@@ -1554,18 +1554,109 @@ class MainActivity : Activity() {
                 .setPositiveButton("知道了", null).show()
             return
         }
-        val generation = browserLoadGeneration
-        noteIoExecutor.execute {
-            val directories = repository.directories().filter { it.uri != document.parentUri }
-            runOnUiThread {
-                if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
-                if (directories.isEmpty()) { toast("没有可用的目标目录"); return@runOnUiThread }
-                val labels = directories.map { it.relativePath.ifBlank { "Vault 根目录" } }.toTypedArray()
-                dialogBuilder().setTitle("移动到…").setItems(labels) { _, index ->
-                    confirmMoveNoteWithAssets(document, directories[index])
-                }.show()
+        val body = LinearLayout(dialogContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+        val scroll = ScrollView(dialogContext()).apply { addView(body) }
+        lateinit var dialog: AlertDialog
+        var current: VaultDocument? = null
+        val history = mutableListOf<VaultDocument>()
+        var requestGeneration = 0L
+        lateinit var showDirectory: (VaultDocument) -> Unit
+
+        fun renderDirectory(directory: VaultDocument, folders: List<VaultDocument>, readable: Boolean) {
+            if (!dialog.isShowing) return
+            body.removeAllViews()
+            body.addView(TextView(dialogContext()).apply {
+                text = directory.relativePath.ifBlank { "Vault 根目录" }
+                textSize = 13f
+                setTextColor(COLOR_MUTED_TEXT)
+                setPadding(dp(12), dp(2), dp(12), dp(8))
+                contentDescription = "当前位置：$text"
+            }, matchWrap())
+            body.addView(infoBanner("选择笔记的新目录；图片和视频会随笔记移动。"), matchWrap().apply {
+                leftMargin = dp(8); rightMargin = dp(8); bottomMargin = dp(8)
+            })
+            if (history.isNotEmpty()) {
+                body.addView(action("‹  上一级", false) {
+                    current = history.removeAt(history.lastIndex)
+                    showDirectory(current!!)
+                }, wrapWrap().apply { leftMargin = dp(8); bottomMargin = dp(6) })
+            }
+            if (!readable) {
+                body.addView(infoBanner("无法读取此目录；文件没有被移动。"), matchWrap().apply {
+                    leftMargin = dp(8); rightMargin = dp(8)
+                })
+                body.addView(action("重新读取", true) { showDirectory(directory) }, wrapWrap().apply {
+                    leftMargin = dp(8); topMargin = dp(8)
+                })
+            } else if (folders.isEmpty()) {
+                body.addView(emptyState("当前目录没有可进入的子文件夹"), matchWrap().apply {
+                    leftMargin = dp(8); rightMargin = dp(8)
+                })
+            } else {
+                sectionLabel(body, "子文件夹", folders.size)
+                body.addView(vaultGroup(folders.map { folder ->
+                    vaultRow(R.drawable.ic_browser_folder, folder.name, "进入文件夹", "文件夹", grouped = true) {
+                        current?.let { history.add(it) }
+                        current = folder
+                        showDirectory(folder)
+                    }
+                }), matchWrap().apply { leftMargin = dp(8); rightMargin = dp(8) })
+            }
+            val select = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            val selectable = readable && directory.uri != document.parentUri
+            select.isEnabled = selectable
+            select.text = if (selectable) "选择此目录" else "当前笔记已在此目录"
+        }
+
+        showDirectory = { directory ->
+            val request = ++requestGeneration
+            current = directory
+            body.removeAllViews()
+            body.addView(emptyState("正在读取文件夹…"), matchWrap().apply {
+                leftMargin = dp(8); rightMargin = dp(8)
+            })
+            noteIoExecutor.execute {
+                val readable = repository.canReadDirectory(directory)
+                val folders = if (readable) repository.children(directory)
+                    .filter { repository.isDirectory(it) && !isInternalDocument(it) }
+                    .sortedBy { it.name.lowercase(Locale.ROOT) }
+                else emptyList()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed || !dialog.isShowing || request != requestGeneration) return@runOnUiThread
+                    renderDirectory(directory, folders, readable)
+                }
             }
         }
+
+        dialog = dialogBuilder()
+            .setTitle("选择移动目标")
+            .setView(scroll)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("选择此目录", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val destination = current ?: return@setOnClickListener
+                if (destination.uri == document.parentUri) return@setOnClickListener
+                dialog.dismiss()
+                confirmMoveNoteWithAssets(document, destination)
+            }
+            noteIoExecutor.execute {
+                val root = repository.vaultRoot()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed || !dialog.isShowing) return@runOnUiThread
+                    if (root == null) {
+                        body.removeAllViews()
+                        body.addView(infoBanner("无法访问 Vault，请重新选择 Vault 后重试。"), matchWrap())
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                    } else showDirectory(root)
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun currentSyncSnapshot(): SyncTaskSnapshot? {
