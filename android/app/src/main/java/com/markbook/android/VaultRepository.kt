@@ -909,6 +909,11 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         }
     }
 
+    fun resolveAttachmentPath(note: VaultDocument, markdownPath: String): String? {
+        val decoded = Uri.decode(markdownPath.trim().removePrefix("<").removeSuffix(">"))
+        return VaultRelativePath.resolveFromNoteParent(note.parentRelativePath, decoded)
+    }
+
     /**
      * Returns the user-owned files that may be synchronized. App configuration, interrupted write
      * artifacts, and the Vault-local trash never leave the device.
@@ -1019,6 +1024,9 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
 
     fun htmlAttachmentUrl(relativePath: String): String =
         "markbook://attachment/" + Uri.encode(relativePath, "/")
+
+    fun htmlAttachmentUrl(note: VaultDocument, markdownPath: String): String? =
+        resolveAttachmentPath(note, markdownPath)?.let(::htmlAttachmentUrl)
 
     private fun findByRelativePath(tree: Uri, relativePath: String): VaultDocument? {
         val parts = normalizeRelativePath(relativePath).split('/').filter { it.isNotEmpty() }

@@ -1814,7 +1814,7 @@ class MainActivity : Activity() {
         root.addView(editor, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(markdownToolbar(), matchWrap())
         setContentView(root)
-        editor.loadDataWithBaseURL(null, renderNote(content), "text/html", "UTF-8", null)
+        editor.loadDataWithBaseURL(null, renderNote(note, content), "text/html", "UTF-8", null)
         updateSaveStatus()
         restorePendingVideoConfirmation(note)
     }
@@ -1838,8 +1838,10 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun renderNote(content: String): String =
-        MarkdownCodec.toHtml(content, repository::htmlAttachmentUrl, isNightTheme())
+    private fun renderNote(note: VaultDocument, content: String): String =
+        MarkdownCodec.toHtml(content, { path ->
+            repository.htmlAttachmentUrl(note, path) ?: "markbook://attachment/invalid"
+        }, isNightTheme())
 
     private fun markdownToolbar(): View = HorizontalScrollView(this).apply {
         formatActions.clear()
@@ -2639,7 +2641,9 @@ class MainActivity : Activity() {
         override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
             val uri = request?.url ?: return false
             if (uri.scheme == "http" || uri.scheme == "https") return false
-            openAttachmentInSystemPlayer(Uri.decode(uri.toString()))
+            val rawPath = Uri.decode(uri.toString())
+            val resolved = currentNote?.let { repository.resolveAttachmentPath(it, rawPath) } ?: rawPath
+            openAttachmentInSystemPlayer(resolved)
             return true
         }
     }
@@ -2671,7 +2675,10 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun openAttachment(relativePath: String) {
-            handler.post { openAttachmentInSystemPlayer(relativePath) }
+            handler.post {
+                val resolved = currentNote?.let { repository.resolveAttachmentPath(it, relativePath) } ?: relativePath
+                openAttachmentInSystemPlayer(resolved)
+            }
         }
     }
 

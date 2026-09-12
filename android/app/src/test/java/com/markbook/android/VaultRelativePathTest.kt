@@ -1,6 +1,7 @@
 package com.markbook.android
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class VaultRelativePathTest {
@@ -23,5 +24,13 @@ class VaultRelativePathTest {
     fun `unaffected daily directory remains unchanged`() {
         assertEquals("Other", VaultRelativePath.renamedDailyDirectory("Other", "Daily", "Journal"))
         assertEquals("Other", VaultRelativePath.resetIfRemoved("Other", "Daily"))
+    }
+
+    @Test
+    fun `relative markdown attachment paths resolve from the moved note parent`() {
+        assertEquals("Projects/assets/a/photo.jpg", VaultRelativePath.resolveFromNoteParent("Projects", "assets/a/photo.jpg"))
+        assertEquals("assets/a/photo.jpg", VaultRelativePath.resolveFromNoteParent("Projects", "../assets/a/photo.jpg"))
+        assertEquals("Projects/assets/a/photo.jpg", VaultRelativePath.resolveFromNoteParent("Projects/Archive", "../assets/a/photo.jpg"))
+        assertNull(VaultRelativePath.resolveFromNoteParent("", "../assets/a/photo.jpg"))
     }
 }

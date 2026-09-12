@@ -41,7 +41,7 @@ Android APK 与 HarmonyOS HAP 分别维护安装包版本；两端共享 Vault �
 
 ### 当前验证
 
-- Android 本地单元测试共 98 项通过，`0 failure / 0 error / 0 skip`，覆盖视频链接
+- Android 本地单元测试共 99 项通过，`0 failure / 0 error / 0 skip`，覆盖视频链接
   round-trip、命名冲突、大小/时长、伪容器、链接重写边界、移动传播策略和 Vault 租约。
 - `0.4.0` debug APK 已成功构建；本地移动/同步分层仍处于开发中。真实 Google Drive、事务故障注入、异常恢复与 Mate 60 端到端验收均待执行，不能标记为候选。
 - 本轮文件库、搜索与编辑体验优化已通过 Android 本地单测与离线 debug APK 构建；新增覆盖包括 Markdown 纯文本搜索、Unicode NFC/大小写匹配、每日路径识别和相对时间边界。

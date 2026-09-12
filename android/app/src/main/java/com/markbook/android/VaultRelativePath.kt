@@ -16,6 +16,20 @@ object VaultRelativePath {
         return if (removedParts.isNotEmpty() && currentParts.startsWith(removedParts)) "" else currentParts.joinToString("/")
     }
 
+    /** Resolves a Markdown-relative path without allowing it to escape the Vault root. */
+    fun resolveFromNoteParent(noteParentRelativePath: String, relativePath: String): String? {
+        if (relativePath.startsWith('/') || relativePath.contains('\\') || relativePath.contains("://")) return null
+        val parts = noteParentRelativePath.split('/').filter { it.isNotEmpty() && it != "." && it != ".." }.toMutableList()
+        for (part in relativePath.split('/')) {
+            when (part) {
+                "", "." -> Unit
+                ".." -> if (parts.isEmpty()) return null else parts.removeAt(parts.lastIndex)
+                else -> parts += part
+            }
+        }
+        return parts.joinToString("/").takeIf { it.isNotBlank() }
+    }
+
     private fun replacePrefix(value: List<String>, oldPrefix: List<String>, replacement: List<String>): List<String> =
         if (oldPrefix.isNotEmpty() && value.startsWith(oldPrefix)) replacement + value.drop(oldPrefix.size) else value
 
