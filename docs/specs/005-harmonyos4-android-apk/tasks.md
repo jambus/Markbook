@@ -83,6 +83,7 @@
 - [x] T514 运行 Android 单测和共享格式样例；`0.1.1` 共 33 项本地单测及 Vault 契约检查通过。
 - [ ] T515 在 Mate 60 验证竖横屏、字体缩放、重启和连续拍照。
 - [ ] T516 输出可安装 APK、版本号、构建记录和真机验收结果。
+- [x] T555 Android：将应用图标替换为深林绿底、暖白色打开笔记本及从中缝生长的三叶树苗（FR-530）。
 
 本机已验证共享 Vault 契约检查与 `android/gradlew --offline --no-daemon assembleDebug` 成功，产物为
 `android/app/build/outputs/apk/debug/app-debug.apk`；Mate 60 真机安装与验收仍未完成。

@@ -24,6 +24,7 @@ Android APK 与 HarmonyOS HAP 分别维护安装包版本；两端共享 Vault �
 ### 当前范围
 
 - 产品中文名为“禾记”，英文名为 “Heji Notes”。中文系统显示“禾记”，其他语言显示 “Heji Notes”。
+- 应用图标采用深林绿底上的暖白色打开笔记本与从中缝生长的三叶树苗，不包含文字或字母。
 - Android `applicationId`、namespace 与 HAP `bundleName` 统一为 `com.jambus.heji`。
 - 标识迁移会被系统视为新应用，旧版不能覆盖安装；用户首次启动需重新选择原 Vault，并重新连接 Google Drive 或 OneDrive。
 - Vault 本身无需转换：既有 Markdown、相对附件链接、`.markbook/` 元数据和 `.markbook-*` 恢复标记继续保持原样。同步的既有远端目录也不自动改名。
