@@ -20,8 +20,12 @@ export class SyncConflictResolver {
   }
 
   static conflictPath(path: string, deviceName: string, timestamp: number): string {
+    const safeDeviceName = deviceName
+      .replace(/[\/\\:*?"<>|]/g, '_')
+      .trim();
+    const label = safeDeviceName.length > 0 ? safeDeviceName : 'device';
     const dotIndex = path.lastIndexOf('.');
-    const suffix = ` (冲突-${deviceName}-${timestamp})`;
+    const suffix = ` (冲突-${label}-${timestamp})`;
     if (dotIndex <= path.lastIndexOf('/')) {
       return `${path}${suffix}`;
     }

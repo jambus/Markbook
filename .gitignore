@@ -3,8 +3,14 @@
 /.ohpm/
 /build/
 /entry/build/
+/.gradle/
+**/.gradle/
+**/build/
+**/local.properties
+/.appanalyzer/
+**/.preview/
+**/.test/
 /local.properties
 /oh_modules/
 *.hap
 *.app
-

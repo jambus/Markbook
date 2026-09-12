@@ -2,7 +2,7 @@
   "module": {
     "name": "entry_test",
     "type": "feature",
-    "description": "Markbook unit tests",
+    "description": "Heji Notes unit tests",
     "deviceTypes": [
       "phone",
       "tablet",
@@ -12,4 +12,3 @@
     "installationFree": false
   }
 }
-

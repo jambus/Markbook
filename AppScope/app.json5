@@ -1,11 +1,10 @@
 {
   "app": {
-    "bundleName": "com.markbook.notes",
-    "vendor": "Markbook",
-    "versionCode": 1000000,
-    "versionName": "1.0.0",
+    "bundleName": "com.jambus.heji",
+    "vendor": "Heji Notes",
+    "versionCode": 1000001,
+    "versionName": "1.0.1",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }
 }
-

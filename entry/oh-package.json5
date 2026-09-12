@@ -1,10 +1,9 @@
 {
   "name": "entry",
   "version": "1.0.0",
-  "description": "Markbook entry module",
+  "description": "Heji Notes entry module",
   "main": "",
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {}
 }
-

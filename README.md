@@ -1,20 +1,30 @@
-# Markbook
+# 禾记（Heji Notes）
 
-Markbook 是一个面向 HarmonyOS 的本地优先 Markdown 笔记本。笔记以普通
-`.md` 文件保存，拍摄的图片会立即复制到同一笔记本的 `attachments/`
-目录，并以相对路径插入正文。
+禾记（Heji Notes） 是一个面向 Mate 手机的本地优先 Markdown 笔记本。笔记以普通 `.md`
+文件保存，拍摄的图片会复制到同一 Vault 的 `attachments/` 目录，并以相对路径
+插入正文。
 
-## 当前能力
+产品采用两套客户端：HarmonyOS 4 优先交付 Android APK，HarmonyOS 5/6 交付
+原生 Stage HAP。两端共享文件格式和验收样例，不共享平台 UI 代码。
 
-- 创建、浏览和编辑本地 Markdown 笔记。
-- 通过系统 CameraPicker 拍照，避免自行维护相机预览与生命周期。
-- 在应用沙箱中使用可迁移的 `notes/` + `attachments/` 目录结构。
-- 提供 `SyncProvider` 边界，为 OneDrive、WebDAV 和 NAS 同步预留统一入口。
+产品规格、技术计划和任务清单统一维护在 [`docs/`](docs/README.md)，按
+Spec Kit 的规格驱动流程推进。
+
+## 当前工程状态
+
+- `entry/` 已包含 HarmonyOS HAP 的本地笔记和拍照基础实现。
+- `android/` 已形成 HarmonyOS 4 APK 的 `0.1.0` 开发基线，包含 Vault 文件库、
+  Markdown 编辑、拍照处理、设置与初始 Google Drive 同步流程。
+- 两端以用户选择的 Obsidian Vault 为事实源。
+- `SyncProvider` 契约为 Google Drive 和 NAS 同步预留统一语义。
+
+版本功能范围、验证状态和后续迭代统一记录在
+[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)。
 
 ## 工程环境
 
-使用 DevEco Studio 5.0.0 Release 或更高版本打开项目，并安装 HarmonyOS
-API 12 SDK。首次打开后让 IDE 完成 ohpm/Hvigor 同步。
+HAP 使用 DevEco Studio 和与其配套的 HarmonyOS SDK。Android APK 工程建立后
+使用项目内 Gradle Wrapper 构建。
 
 常用命令（DevEco 终端）：
 
@@ -24,19 +34,26 @@ hvigorw assembleHap
 hvigorw test
 ```
 
-当前机器未安装 DevEco Studio 命令行工具，因此提交前仍需在 DevEco Studio
-中执行签名、真机拍照和 HAP 构建验证。
+HarmonyOS 4 APK（在 `android/` 目录）：
+
+```bash
+./gradlew :app:assembleDebug
+```
+
+Android APK 与 HarmonyOS HAP 必须分别在 HarmonyOS 4 Mate 60 和 HarmonyOS 5/6
+Mate 真机完成安装、文件授权、拍照和重启恢复验证。
 
 ## 数据布局
 
-运行时笔记本位于应用沙箱的 `files/Markbook/`：
+运行时笔记本位于用户选择的 Obsidian Vault；示例约定为：
 
 ```text
-Markbook/
-├── notes/
-│   └── <timestamp>.md
+Vault/
+├── Daily Notes/
+│   └── YYYY-MM-DD.md
 └── attachments/
-    └── photo-<timestamp>.jpg
+    ├── <uuid>-original.jpg
+    └── <uuid>-corrected.jpg
 ```
 
 同步实现应整体同步该目录，并保留 Markdown 中的相对图片链接。

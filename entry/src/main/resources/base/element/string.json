@@ -6,12 +6,15 @@
     },
     {
       "name": "EntryAbility_desc",
-      "value": "Markbook 主界面"
+      "value": "Heji Notes main interface"
     },
     {
       "name": "EntryAbility_label",
-      "value": "Markbook"
+      "value": "Heji Notes"
+    },
+    {
+      "name": "onedrive_client_id",
+      "value": "REPLACE_WITH_ENTRA_CLIENT_ID"
     }
   ]
 }
-

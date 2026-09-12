@@ -18,6 +18,30 @@ export default function markdownDocumentTest(): void {
     it('uses a fallback title', 0, () => {
       expect(MarkdownDocument.title('没有标题')).assertEqual('未命名笔记');
     });
+
+    it('inserts an attachment block at the current caret', 0, () => {
+      const result = MarkdownDocument.insertBlock(
+        'before after',
+        '![照片](../attachments/photo.jpg)',
+        7,
+        7
+      );
+
+      expect(result.content).assertEqual(
+        'before \n\n![照片](../attachments/photo.jpg)\n\nafter'
+      );
+      expect(result.caretOffset).assertEqual(42);
+    });
+
+    it('replaces selected text without redundant blank lines', 0, () => {
+      const result = MarkdownDocument.insertBlock(
+        'before\n\nreplace\n\nafter',
+        '![photo](image.jpg)',
+        8,
+        15
+      );
+
+      expect(result.content).assertEqual('before\n\n![photo](image.jpg)\n\nafter');
+    });
   });
 }
-
