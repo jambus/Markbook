@@ -11,7 +11,7 @@
   若不具备，需选择不依赖 GMS 的官方 OAuth 流程并更新 `003` 与 `005`。
 - 用户选择的 Drive Vault 使用完整 Drive scope 时的审核、限额和正式发布要求。
 - Drive changes 游标、条件写入、较大图片可恢复上传、范围下载和远端回收站语义。
-- 电脑端 Obsidian 与 Markbook 同时修改时，修改时间、revision 和冲突副本的实际表现。
+- 电脑端 Obsidian 与 禾记（Heji Notes） 同时修改时，修改时间、revision 和冲突副本的实际表现。
 
 ## NAS 待验证
 

@@ -23,7 +23,7 @@ export class OneDriveOAuthConfig {
       throw new Error('OneDrive client ID is required');
     }
     if (!redirectUri.startsWith('markbook://')) {
-      throw new Error('OneDrive redirect URI must use the Markbook scheme');
+      throw new Error('OneDrive redirect URI must use the legacy markbook scheme');
     }
     if (!/^[A-Za-z0-9.-]+$/.test(tenant)) {
       throw new Error('Invalid Microsoft tenant');

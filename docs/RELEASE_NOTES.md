@@ -1,6 +1,6 @@
-# Markbook Release Notes
+# 禾记（Heji Notes）Release Notes
 
-本文档记录 Markbook 每个可识别版本的功能范围、交付状态、兼容性说明和后续事项。
+本文档记录禾记（Heji Notes）每个可识别版本的功能范围、交付状态、兼容性说明和后续事项。
 Android APK 与 HarmonyOS HAP 分别维护安装包版本；两端共享 Vault 契约，但不因功能
 相近而复用版本号或隐含彼此已经完成验收。
 
@@ -15,7 +15,26 @@ Android APK 与 HarmonyOS HAP 分别维护安装包版本；两端共享 Vault �
   构建记录后，才能标记为“已发布”。
 - 尚未完成的优化不写入“已实现功能”，统一关联到对应编号规格的未完成任务。
 
-## 0.4.0 — 当前开发版本
+## 0.5.0 — 品牌与安装标识迁移
+
+**状态**：开发中，待 Android 构建和真机重新授权验收（非候选）
+**Android 安装包版本**：`versionName = 0.5.0`，`versionCode = 9`
+**HAP 安装包版本**：`versionName = 1.0.1`，`versionCode = 1000001`
+
+### 当前范围
+
+- 产品中文名为“禾记”，英文名为 “Heji Notes”。中文系统显示“禾记”，其他语言显示 “Heji Notes”。
+- Android `applicationId`、namespace 与 HAP `bundleName` 统一为 `com.jambus.heji`。
+- 标识迁移会被系统视为新应用，旧版不能覆盖安装；用户首次启动需重新选择原 Vault，并重新连接 Google Drive 或 OneDrive。
+- Vault 本身无需转换：既有 Markdown、相对附件链接、`.markbook/` 元数据和 `.markbook-*` 恢复标记继续保持原样。同步的既有远端目录也不自动改名。
+- Google Cloud Console 必须为 `com.jambus.heji` 和发行签名 SHA-1 新建或更新 OAuth Android 客户端；未完成前 Google Drive 登录不能视为已验收。
+
+### 当前验证
+
+- HAP 已通过 `./scripts/build-hap.sh` 构建；现有 ArkTS 异常处理与弃用 API 警告不由本次改名引入。
+- 待执行 Android 单测、debug APK 构建，以及 Mate 60 上的新安装、Vault 重新选择、云端重新授权和既有 Vault 互操作验证。
+
+## 0.4.0 — 原 Markbook 当前开发版本
 
 **状态**：开发中，待本地事务/Drive 故障测试与 Mate 60 验收（非候选）
 **安装包版本**：`versionName = 0.4.0`，`versionCode = 7`
@@ -50,6 +69,28 @@ Android APK 与 HarmonyOS HAP 分别维护安装包版本；两端共享 Vault �
 - Mate 60 的文件库左滑、系统相机/播放器、强制结束、限制边界、外部正文变更、回收站移动在慢 I/O/Provider 下的阶段反馈与列表复核，以及后台同步离开页面、通知、取消、中断恢复和同路径冲突验收尚未执行，故仍非候选。
 - Mate 60 还需补充搜索大库性能、快速改写查询、深路径/长文件名、TalkBack、字体放大、深浅色与图片/视频插入定位反馈验收。
 - Mate 60 还需补充回收站为空、只读查看、单项笔记/文件夹删除、取消、部分失败、清空、确认后新增项目隔离、旋转、TalkBack 和权限失效验收。
+
+## 0.3.0 — 文件库与视频记录
+
+**状态**：开发实现完成，待 Mate 60 验收（非候选）
+**安装包版本**：`versionName = 0.3.0`，`versionCode = 6`
+
+### 当前范围
+
+- 文件库管理：在当前目录新建 Markdown 笔记或文件夹、重命名、移到 Vault 根 `.trash/`，并以 NFC/大小写无关规则防止冲突。
+- 文件库左滑：普通条目左滑显示“重命名”和“删除”；删除仍须确认后移到回收站，保留长按和 TalkBack 等价入口。
+- 短视频：编辑器“拍摄”可选择拍照或系统相机录视频；视频原样写入当前笔记附件目录并插入相对 Markdown 链接。
+
+### 视频边界
+
+- 视频限制为 180 秒/200 MiB，接受具备有效 MP4/3GP 容器和 video 轨的文件。
+- 使用不复制正文的 pending 会话、附件/提交阶段、可取消流式复制、hash 外变保护和 marker 恢复确保异常不会覆盖、重复插入或留下死链接。
+
+### 当前验证
+
+- Android 本地单元测试共 77 项通过，`0 failure / 0 error / 0 skip`，覆盖视频链接 round-trip、命名冲突、大小/时长、伪容器、rename 不确定与恢复策略。
+- 共享 Vault 契约检查通过，debug APK 构建成功；版本为 `versionName = 0.3.0`、`versionCode = 6`。
+- Mate 60 的文件库左滑、系统相机/播放器、强制结束、限制边界与外部正文变更验收尚未执行，故仍非候选。
 
 ## 0.2.0 — 回收站管理
 

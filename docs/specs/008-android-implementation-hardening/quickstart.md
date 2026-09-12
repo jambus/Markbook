@@ -21,7 +21,7 @@ cd android
 ### V1 内容保真（FR-801、FR-802）
 
 1. 记录 `Fixtures/rich-blocks.md` 的原始内容。
-2. 在 Markbook 中打开该笔记，仅修改第一段文字，等待状态变为「已保存」。
+2. 在 禾记（Heji Notes） 中打开该笔记，仅修改第一段文字，等待状态变为「已保存」。
 3. 用外部工具比对文件：除被编辑段落外，其余行的文本与缩进必须逐字节一致。
 
 ### V2 未编辑不写入（FR-804）
@@ -48,7 +48,7 @@ cd android
 ### V6 编辑器资源（FR-812）
 
 1. 连续进出编辑器 20 次。
-2. 通过 `adb shell dumpsys meminfo com.markbook.android` 确认 `Views` 与进程内存不持续单调增长。
+2. 通过 `adb shell dumpsys meminfo com.jambus.heji` 确认 `Views` 与进程内存不持续单调增长。
 
 ### V7 拍照与恢复（FR-806、FR-813、FR-814）
 

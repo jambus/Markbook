@@ -9,7 +9,7 @@
    暂不做关系图谱和插件生态。
 2. 已确认：首发设备为运行 HarmonyOS 4 的 Mate 60；优先交付 Android APK。
    HarmonyOS 5/6 使用独立的原生 HAP 实现，平板和 2in1 暂不作为首要验收对象。
-3. 已确认：用户选择已有 Obsidian Vault，Markbook 直接读写其中内容文件。
+3. 已确认：用户选择已有 Obsidian Vault，禾记（Heji Notes） 直接读写其中内容文件。
 
 ## 编辑与图片
 

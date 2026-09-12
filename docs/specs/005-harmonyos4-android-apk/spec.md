@@ -4,7 +4,7 @@
 **Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
 004-harmony-4-5-compatibility
-**Current Baseline**: Android APK `0.4.0` development (`versionCode 7`)
+**Current Baseline**: Android APK `0.5.0` development (`versionCode 9`)
 
 ## Goal
 
@@ -101,6 +101,7 @@ Mate 60 真机验收前，该版本不得标记为正式发布。
 - **FR-525** Android 设置中的“回收站”必须打开 Vault 根 `.trash/` 的直接项目浏览页；Markdown 以独立只读查看器打开。单项永久删除和清空均在确认后按直接子项快照执行，文件夹只允许 Provider 整体删除，附件保留且删除失败不移除源项目。
 - **FR-526** Android 文件库的普通笔记长按菜单必须提供“移动到…”。它以纯本地 marker 事务移动笔记和独占附件 bundle、重写本地链接并记录 provider-neutral `MoveBundle` 变化，不读取 Drive 配置。下一轮同步用变化历史和基线更新 Drive；仅运行中的同 Vault 同步拒绝结构移动，引用扫描、冲突和恢复必须保守。
 - **FR-527** “移动到…”必须提供仅含普通目录的层级选择器：显示当前 Vault 相对路径、可进入子目录和返回上级，并以明确的“选择此目录”提交；根目录可选，当前笔记所在目录不可选，取消不修改 Vault。
+- **FR-529** Android 安装包标识必须为 `com.jambus.heji`，并按系统语言显示“禾记”（中文）或 “Heji Notes”（其他语言）。此标识替换将作为新应用安装：首次启动需重新选择原 Vault 并重新连接 Google Drive，Vault 内既有 `.markbook` 元数据、Markdown 与附件链接不得迁移或改写。
 
 ## Out of Scope
 

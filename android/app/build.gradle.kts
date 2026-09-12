@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "com.markbook.android"
+    namespace = "com.jambus.heji"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.markbook.android"
+        applicationId = "com.jambus.heji"
         minSdk = 26
         targetSdk = 28
-        versionCode = 7
-        versionName = "0.4.0"
+        versionCode = 9
+        versionName = "0.5.0"
     }
 
     compileOptions {

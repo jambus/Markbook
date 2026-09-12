@@ -394,7 +394,7 @@ struct Index {
     Column() {
       Row() {
         Column() {
-          Text('Markbook')
+          Text($r('app.string.EntryAbility_label'))
             .fontSize(28)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.ink'))

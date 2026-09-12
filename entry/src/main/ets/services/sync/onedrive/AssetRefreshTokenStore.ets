@@ -5,8 +5,8 @@ import type { RefreshTokenStore } from './OneDriveSession';
 
 const SECRET_LIMIT = 1024;
 const MAX_CHUNKS = 64;
-const MANIFEST_ALIAS = 'markbook.onedrive.refresh.manifest';
-const CHUNK_ALIAS_PREFIX = 'markbook.onedrive.refresh.chunk';
+const MANIFEST_ALIAS = 'heji.notes.onedrive.refresh.manifest';
+const CHUNK_ALIAS_PREFIX = 'heji.notes.onedrive.refresh.chunk';
 const NOT_FOUND = 24000002;
 
 class RefreshTokenManifest {

@@ -1,6 +1,6 @@
-# Markbook
+# 禾记（Heji Notes）
 
-Markbook 是一个面向 Mate 手机的本地优先 Markdown 笔记本。笔记以普通 `.md`
+禾记（Heji Notes） 是一个面向 Mate 手机的本地优先 Markdown 笔记本。笔记以普通 `.md`
 文件保存，拍摄的图片会复制到同一 Vault 的 `attachments/` 目录，并以相对路径
 插入正文。
 

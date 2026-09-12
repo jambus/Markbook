@@ -7,18 +7,18 @@
 ## Goal
 
 确保 Android APK、HarmonyOS Stage HAP 和电脑 Obsidian 可以围绕同一个用户 Vault
-工作，不需要导入、格式转换或 Markbook 专有数据库。本规格只定义跨端契约、迁移和
+工作，不需要导入、格式转换或 禾记（Heji Notes） 专有数据库。本规格只定义跨端契约、迁移和
 互操作验收；Android 功能实现由 `005` 管理，HAP 功能实现由 `006` 管理。
 
 ## Platform References
 
-Markbook 提供两套独立安装包：
+禾记（Heji Notes） 提供两套独立安装包：
 
 - HarmonyOS 4：Android APK，首要实现与验收对象为 Mate 60。
 - HarmonyOS 5/6：原生 HarmonyOS Stage HAP，在 APK 核心闭环稳定后对齐。
 
 两套客户端可以使用不同 UI 和平台 API，但必须直接读写同一种 Obsidian Vault，
-不得通过 Markbook 专有数据库交换数据。
+不得通过 禾记（Heji Notes） 专有数据库交换数据。
 
 共享文件布局、附件命名、事务恢复、回收站和冲突副本规则详见
 [`docs/contracts/vault-contract.md`](../../contracts/vault-contract.md)。

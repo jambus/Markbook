@@ -1,4 +1,4 @@
-# Markbook Android APK
+# 禾记（Heji Notes） Android APK
 
 This module is the priority client for Mate 60 devices running HarmonyOS 4.
 It uses Kotlin, the Android Storage Access Framework, the system camera intent,

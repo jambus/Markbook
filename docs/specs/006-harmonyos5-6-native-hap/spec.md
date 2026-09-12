@@ -19,6 +19,7 @@
 - **FR-605** 平台权限或能力不同导致无法完全一致时，必须提供可见降级并记录差异。
 - **FR-606** 必须分别在 HarmonyOS 5 与 HarmonyOS 6 Mate 手机上完成真机验收。
 - **FR-607** HAP 必须在文件库能力完成后对齐 Android 的笔记与独占附件 bundle 移动、嵌套 assets 布局、链接重写及 marker 恢复；在此之前不得声称跨端对齐。
+- **FR-608** HAP 的 `bundleName` 必须为 `com.jambus.heji`，并按系统语言显示“禾记”（中文）或 “Heji Notes”（其他语言）。该标识变化视为新安装，首次运行需重新选择既有 Vault；Vault 内 `.markbook` 元数据、Markdown 与附件路径保持不变。
 
 ## Out of Scope
 

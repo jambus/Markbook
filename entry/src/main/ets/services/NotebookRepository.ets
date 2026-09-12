@@ -4,7 +4,7 @@ import { MarkdownDocument } from '../model/MarkdownDocument';
 import { Note } from '../model/Note';
 
 const NOTE_EXTENSION = '.md';
-const APP_STATE_DIR = 'Markbook';
+const APP_STATE_DIR = 'Heji Notes';
 const VAULT_URI_FILE = 'vault-uri.txt';
 const DAILY_NOTES_DIR = 'Daily Notes';
 

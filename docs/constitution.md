@@ -1,4 +1,4 @@
-# Markbook Constitution
+# 禾记（Heji Notes） Constitution
 
 **Version**: 1.1.0
 **Ratified**: 2026-07-24

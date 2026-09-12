@@ -11,7 +11,7 @@
 ## Planned Structure
 
 ```text
-Markbook/
+禾记（Heji Notes）/
 ├── android/                  # HarmonyOS 4 APK，Kotlin/Gradle
 │   └── app/src/
 ├── entry/                    # HarmonyOS 5/6 HAP，ArkTS/Hvigor

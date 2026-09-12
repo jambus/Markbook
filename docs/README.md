@@ -1,6 +1,6 @@
-# Markbook 项目文档
+# 禾记（Heji Notes） 项目文档
 
-本目录是 Markbook 的唯一文档入口，采用 GitHub Spec Kit 的规格驱动方式，
+本目录是 禾记（Heji Notes） 的唯一文档入口，采用 GitHub Spec Kit 的规格驱动方式，
 执行顺序为：
 
 `constitution → specify → clarify → plan → tasks → analyze → implement`

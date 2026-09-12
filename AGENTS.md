@@ -74,7 +74,7 @@ unstaged for user review.
 
 ## Project Structure & Module Organization
 
-Markbook has two mobile clients sharing one Vault contract. The priority client
+禾记（Heji Notes） has two mobile clients sharing one Vault contract. The priority client
 is an Android APK for HarmonyOS 4 Mate 60 devices; its Kotlin/Gradle sources
 live under `android/`. The existing `entry/` module is the
 HarmonyOS 5/6 Stage HAP. App resources and metadata live in `AppScope/`, and

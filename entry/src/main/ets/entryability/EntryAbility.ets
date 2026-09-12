@@ -7,7 +7,7 @@ const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    hilog.info(DOMAIN, 'Markbook', 'EntryAbility created');
+    hilog.info(DOMAIN, 'Heji Notes', 'EntryAbility created');
     this.captureOAuthCallback(want);
   }
 
@@ -18,7 +18,7 @@ export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     windowStage.loadContent('pages/Index', (error) => {
       if (error.code) {
-        hilog.error(DOMAIN, 'Markbook', 'Failed to load page: %{public}s', JSON.stringify(error));
+        hilog.error(DOMAIN, 'Heji Notes', 'Failed to load page: %{public}s', JSON.stringify(error));
       }
     });
   }

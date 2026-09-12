@@ -3,7 +3,7 @@
 ## Technical Context
 
 - Kotlin Android 工程位于 `android/`，使用项目内 Gradle Wrapper。
-- 当前开发版本为 `versionName 0.4.0`、`versionCode 7`；后续候选版本按
+- 当前开发版本为 `versionName 0.5.0`、`versionCode 9`；后续候选版本按
   [`docs/RELEASE_NOTES.md`](../../RELEASE_NOTES.md) 的规则提升并记录。
 - 通过 Storage Access Framework 选择 Vault 并持久化目录 URI 权限。
 - 通过 Activity Result API 拉起系统相机并复制返回内容。
@@ -37,6 +37,7 @@
 18. 将设置中的回收站改为可浏览的根 `.trash/` 直接项目页面，提供只读 Markdown 查看、单项永久删除和快照式清空；保持附件保留、Provider 整体文件夹删除和失败恢复规则。
 19. 为普通笔记增加“移动到…”目标选择与纯本地笔记/附件 bundle 三对象事务；提交后记录平台无关移动变化。同步空闲时允许移动，运行中的同 Vault 同步通过原子租约拒绝结构变更。
 20. 将笔记移动目标从扁平文件夹列表改为层级目录选择器，保留当前位置、上级导航、根目录和明确提交语义。
+21. 将 Android 应用标识迁移至 `com.jambus.heji`，提供“禾记”与 “Heji Notes”本地化名称；记录其作为新安装包需重新授权 Vault 与 Google Drive 的影响，同时保持 Vault `.markbook` 契约不变。
 
 ## Constitution Check
 

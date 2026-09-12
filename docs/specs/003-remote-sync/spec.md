@@ -30,8 +30,8 @@
 ### US5 Android Google Drive Vault（P1）
 
 Mate 60 用户在 Android APK 中登录已有 Google 账号，选择一个已有的 Google Drive
-文件夹作为 Vault 根目录。手机 Markbook 与电脑 Obsidian 围绕该目录交换 Markdown
-和图片，不需要把文件复制进 Markbook 私有空间。
+文件夹作为 Vault 根目录。手机 禾记（Heji Notes） 与电脑 Obsidian 围绕该目录交换 Markdown
+和图片，不需要把文件复制进 禾记（Heji Notes） 私有空间。
 
 ### US6 后台同步与详情（P1）
 
@@ -42,7 +42,7 @@ Mate 60 用户在 Android APK 中登录已有 Google 账号，选择一个已有
 
 - **FR-301** Provider 必须实现统一的枚举、下载、上传、删除和增量状态契约。
 - **FR-302** Google Drive Provider 必须使用官方授权流程和最小权限，不能要求
-  用户把密码交给 Markbook。
+  用户把密码交给 禾记（Heji Notes）。
 - **FR-303** NAS Provider 必须支持威联通 TS-251D 和极空间的局域网、外网访问；
   具体通用协议须通过真实设备验证，不得依赖单一厂商私有 API。
 - **FR-304** 完整同步范围包括 Vault 中的 Markdown 和照片附件，但不得同步
@@ -64,7 +64,7 @@ Mate 60 用户在 Android APK 中登录已有 Google 账号，选择一个已有
 - **FR-315** Android 首阶段必须让用户选择已有的 Drive 文件夹，并在首次实际
   写入前显示本地 Vault、Drive 文件夹和包含范围的确认页。
 - **FR-316** Android 手动同步必须比较整个 Vault 中的 Markdown 与 `assets/`，排除
-  `.obsidian/`、`.trash/`、临时文件和 Markbook 本机同步元数据；`.trash/` 是仅在手机
+  `.obsidian/`、`.trash/`、临时文件和 禾记（Heji Notes） 本机同步元数据；`.trash/` 是仅在手机
   本地保留的删除区。
 - **FR-318** Drive 文件夹选择器必须允许在当前目录创建远端文件夹；只有用户随后明确
   选择“使用此目录”，新文件夹才成为同步 Vault。

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MarkbookAndroid"
+rootProject.name = "HejiNotesAndroid"
 include(":app")

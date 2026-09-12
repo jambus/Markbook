@@ -22,7 +22,7 @@ if command -v adb >/dev/null 2>&1; then
 fi
 
 if [[ -x "$hdc" ]]; then
-  probe_file="$(mktemp -t markbook-hdc.XXXXXX)"
+  probe_file="$(mktemp -t heji-notes-hdc.XXXXXX)"
   "$hdc" list targets >"$probe_file" 2>&1 &
   hdc_pid=$!
   for _ in {1..10}; do
@@ -43,7 +43,7 @@ if [[ -x "$hdc" ]]; then
     exit 4
   fi
   if [[ -n "$hdc_targets" ]]; then
-    install_file="$(mktemp -t markbook-hdc-install.XXXXXX)"
+    install_file="$(mktemp -t heji-notes-hdc-install.XXXXXX)"
     if "$hdc" install "$apk" >"$install_file" 2>&1; then
       cat "$install_file"
       rm -f "$install_file"

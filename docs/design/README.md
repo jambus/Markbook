@@ -1,4 +1,4 @@
-# Markbook 设计知识库
+# 禾记（Heji Notes） 设计知识库
 
 本目录是 Android APK 与 HarmonyOS HAP 的共同体验基线。数据格式、附件路径、事务恢复
 和冲突规则以 [`docs/contracts/vault-contract.md`](../contracts/vault-contract.md) 为准；

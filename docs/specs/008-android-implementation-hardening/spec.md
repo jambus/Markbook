@@ -13,9 +13,9 @@
 
 ## User Stories
 
-### US1 用 Markbook 打开笔记不会破坏 Obsidian 里写好的内容（P0）
+### US1 用 禾记（Heji Notes） 打开笔记不会破坏 Obsidian 里写好的内容（P0）
 
-用户在 Obsidian 中写有代码块、表格、有序列表、嵌套列表、引用和 YAML front matter 的笔记，用 Markbook 打开、编辑其中一段并保存后，未触及的部分与原文逐字节一致。
+用户在 Obsidian 中写有代码块、表格、有序列表、嵌套列表、引用和 YAML front matter 的笔记，用 禾记（Heji Notes） 打开、编辑其中一段并保存后，未触及的部分与原文逐字节一致。
 
 **Acceptance**: 含上述结构的样例笔记经「打开 → 编辑首段 → 保存」后，除被编辑段落外的原始文本与缩进保持不变。
 
