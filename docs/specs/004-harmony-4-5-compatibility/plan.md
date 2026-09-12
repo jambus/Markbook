@@ -25,7 +25,7 @@ Markbook/
 - Android 平台 API、构建和设备适配属于 `005`。
 - HarmonyOS 平台 API、构建、签名和设备适配属于 `006`。
 - 共享契约：UTF-8 `.md`、Vault 原目录、POSIX 风格相对链接、
-  `assets/<note-file-stem>/`、`<HHmmss>-<xxxx>-o.<ext>` 与
+  笔记父目录 `assets/<note-file-stem>/`、`<HHmmss>-<xxxx>-o.<ext>` 与
   `<HHmmss>-<xxxx>-c.<ext>` 成对命名及 `<HHmmss>-<xxxx>-v.{mp4|3gp}` 视频命名、冲突副本和回收站约定；两端继续兼容已有
   `attachments/` 中的 UUID 命名历史文件。
 - 同步 Provider 在两端分别实现，但必须通过同一组文件级契约测试。
@@ -38,6 +38,7 @@ Markbook/
 4. 比较两端输出，并在电脑 Obsidian 中验证无需迁移。
 5. 验证跨端冲突、本地回收站语义和同步边界。
 6. 建立双安装包版本、签名、设备和回归矩阵。
+7. 用共享样例验证笔记与附件 bundle 的移动、链接重写、中断恢复和移动后继续捕获。
 
 ## Constitution Check
 

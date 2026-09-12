@@ -10,7 +10,7 @@ object VaultPathPolicy {
     )
 
     fun isProtected(relativePath: String): Boolean =
-        relativePath.substringBefore('/') in protectedRootChildren
+        relativePath.split('/').any { it in protectedRootChildren }
 
     fun isProtectedRootName(name: String): Boolean =
         Normalizer.normalize(name, Normalizer.Form.NFC).lowercase(Locale.ROOT) in protectedRootChildren

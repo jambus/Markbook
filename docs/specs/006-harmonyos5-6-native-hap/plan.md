@@ -12,6 +12,7 @@ CameraPicker 和平台安全存储。现有 HAP 实现作为基础，但交付�
 2. 对齐 APK 的 Vault、编辑、保存、拍照和短视频闭环。
 3. 通过共享格式样例及 APK 生成 Vault 的互操作测试。
 4. 在 HarmonyOS 5/6 Mate 手机上完成权限、布局、重启和相机回归。
+5. 实现文件库后对齐笔记与附件 bundle 移动和新的父目录 `assets/<stem>/` 捕获路径。
 
 ## Constitution Check
 

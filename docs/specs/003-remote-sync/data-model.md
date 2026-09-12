@@ -16,7 +16,7 @@
 ## SyncBaseline
 
 - `providerId`
-- `notebookId`
+- `notebookId`、`accountId`、`remoteRootId`：三者共同绑定一份基线；切换 Vault、账号或远端根目录不得复用。
 - `files`: 上次完整成功时的文件快照。
 - `cursor`: Provider opaque 增量游标；客户端不得解析或修改。
 - `completedAt`
@@ -27,6 +27,16 @@
 - `relativePath`
 - `expectedRevision`: 条件操作所需的远端版本。
 - `state`: pending、running、completed、failed、cancelled。
+
+## LocalChange
+
+- `changeId`、`vaultId`、`type`：平台无关的本地变化身份；搬运使用 `MoveBundle`。
+- `sourcePaths`、`targetPaths`：Vault POSIX 相对路径，不含 Provider 或账号信息。
+- `beforeFingerprints`、`afterFingerprints`：用于与上次成功基线和当前快照复核。
+- `committedAt`、`acknowledgedAt`：本地提交与完整同步确认时间。
+
+本地事务完成后才追加变化；Provider 在规划阶段消费但不能改变其本地提交语义。
+只有成功提交新同步基线后才能确认变化。连续搬运可以按稳定文件身份合并目标路径。
 
 ## SyncJobState
 

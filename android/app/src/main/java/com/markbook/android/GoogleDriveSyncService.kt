@@ -26,7 +26,11 @@ data class DriveSyncResult(
  */
 class GoogleDriveSyncService(
     private val repository: VaultRepository,
-    private val api: GoogleDriveApi,
+    private val api: DriveGateway,
+    private val vaultId: String = "",
+    private val accountId: String = "",
+    private val changeStore: MoveChangeStore? = null,
+    private val baselineStore: DriveBaselineStore? = null,
     private val cancelled: AtomicBoolean = AtomicBoolean(false),
     private val onProgress: (DriveSyncProgress) -> Unit = {}
 ) {
@@ -42,11 +46,30 @@ class GoogleDriveSyncService(
         }
         if (cancelled.get()) return DriveSyncResult(0, 0, 0, 0, emptyList(), true)
 
-        val localFiles = repository.syncFiles().associateBy { it.relativePath }
+        val localFiles = try { repository.syncFilesStrict().associateBy { it.relativePath } } catch (_: Exception) {
+            return DriveSyncResult(0, 0, 0, 0, listOf("无法完整读取本地 Vault，本次同步未修改远端"), false)
+        }
+        val localMd5 = localFiles.mapValues { (_, file) -> md5(repository.openSyncInput(file)) ?: return DriveSyncResult(0, 0, 0, 0, listOf("无法读取本地同步文件"), false) }
+        val localSha256 = localFiles.mapValues { (_, file) -> sha256(repository.openSyncInput(file)) ?: return DriveSyncResult(0, 0, 0, 0, listOf("无法读取本地同步文件"), false) }
+        val baseline = when (val loaded = baselineStore?.load(vaultId, root.id, accountId)) {
+            null, DriveBaselineLoad.Missing -> emptyMap()
+            is DriveBaselineLoad.Present -> loaded.baseline.files
+            DriveBaselineLoad.Corrupt -> return DriveSyncResult(0, 0, 0, 0, listOf("同步基线损坏，本次同步未修改远端"), false)
+        }
+        val moveChanges = when (val loaded = changeStore?.changes(vaultId)) {
+            null -> if (changeStore == null) emptyList() else return DriveSyncResult(0, 0, 0, 0, listOf("本地变化历史损坏，本次同步未修改远端"), false)
+            else -> loaded
+        }
+        if (moveChanges.any { it.state != LocalChangeState.COMMITTED }) {
+            return DriveSyncResult(0, 0, 0, 0, listOf("本地移动仍在恢复中，请重启应用后重试同步"), false)
+        }
+        val moveSources = moveChanges.flatMap { it.sourceToTarget.keys }.toSet()
+        val allMoveMappings = moveChanges.flatMap { it.sourceToTarget.entries }.associate { it.key to it.value }
         var uploaded = 0
         var downloaded = 0
         var unchanged = 0
         var conflicts = 0
+        val completedChangeIds = mutableListOf<String>()
         val total = localFiles.size + remoteFiles.keys.minus(localFiles.keys).size
         var completed = 0
 
@@ -60,27 +83,65 @@ class GoogleDriveSyncService(
                         upload(path, local, remoteFolders)
                         uploaded++
                     }
-                    remote.md5 != null && remote.md5.equals(md5(repository.openSyncInput(local)), true) -> {
+                    remote.md5 != null && remote.md5.equals(localMd5[path], true) -> {
                         unchanged++
                     }
                     else -> {
-                        report(completed, total, "发现冲突：$path")
-                        val stamp = conflictStamp()
-                        val remoteConflictPath = conflictPath(path, "Google Drive", stamp)
-                        api.download(remote).use { input ->
-                            val saved = repository.writeSyncFileIfAbsent(
-                                remoteConflictPath,
-                                remote.mimeType,
-                                input
-                            )
-                            if (!saved) throw IllegalStateException("Unable to preserve Drive conflict copy")
+                        val base = baseline[path]
+                        val remoteHash = remote.md5 ?: md5(api.download(remote))
+                        val localChanged = base == null || !base.localSha256.equals(localSha256[path], true)
+                        val remoteChanged = base == null || base.remoteId != remote.id || !base.remoteMd5.equals(remoteHash, true)
+                        when {
+                            localChanged && !remoteChanged -> {
+                                report(completed, total, "正在上传本地更新：$path")
+                                val revision = api.revision(remote.id)
+                                val current = revision.item
+                                val currentHash = current.md5 ?: md5(api.download(current))
+                                if (current.version != remote.version || !currentHash.equals(remoteHash, true)) {
+                                    throw IllegalStateException("Google Drive file changed during sync")
+                                }
+                                repository.openSyncInput(local)?.use { api.replace(remote.id, revision.etag, local.document.mimeType ?: "application/octet-stream", it) }
+                                    ?: throw IllegalStateException("Unable to read local file")
+                                uploaded++
+                            }
+                            !localChanged && remoteChanged -> {
+                                report(completed, total, "正在下载远端更新：$path")
+                                if (!localMd5[path].equals(repository.syncMd5(path), true)) {
+                                    val conflict = conflictPath(path, "Google Drive", conflictStamp())
+                                    api.download(remote).use { input ->
+                                        if (!repository.writeSyncFileIfAbsent(conflict, remote.mimeType, input)) throw IllegalStateException("Unable to preserve concurrent local edit")
+                                    }
+                                    conflicts++
+                                } else {
+                                    val written = api.download(remote).use { input -> repository.writeSyncFile(path, remote.mimeType, input, localMd5[path]) }
+                                    if (written) {
+                                        downloaded++
+                                    } else {
+                                        val conflict = conflictPath(path, "Google Drive", conflictStamp())
+                                        api.download(remote).use { input -> if (!repository.writeSyncFileIfAbsent(conflict, remote.mimeType, input)) throw IllegalStateException("Unable to preserve concurrent local edit") }
+                                        conflicts++
+                                    }
+                                }
+                            }
+                            else -> {
+                                report(completed, total, "发现冲突：$path")
+                                val stamp = conflictStamp()
+                                val remoteConflictPath = conflictPath(path, "Google Drive", stamp)
+                                api.download(remote).use { input ->
+                                    val saved = repository.writeSyncFileIfAbsent(remoteConflictPath, remote.mimeType, input)
+                                    if (!saved) throw IllegalStateException("Unable to preserve Drive conflict copy")
+                                }
+                                val parentId = ensureRemoteFolder(path.substringBeforeLast('/', ""), remoteFolders)
+                                api.copy(remote.id, parentId, remoteConflictPath.substringAfterLast('/'))
+                                val input = repository.openSyncInput(local) ?: throw IllegalStateException("Unable to read local file")
+                                val revision = api.revision(remote.id)
+                                val current = revision.item
+                                val currentHash = current.md5 ?: md5(api.download(current))
+                                if (current.version != remote.version || !currentHash.equals(remoteHash, true)) throw IllegalStateException("Google Drive file changed during sync")
+                                input.use { api.replace(remote.id, revision.etag, local.document.mimeType ?: "application/octet-stream", it) }
+                                conflicts++
+                            }
                         }
-                        val parentId = ensureRemoteFolder(path.substringBeforeLast('/', ""), remoteFolders)
-                        api.copy(remote.id, parentId, remoteConflictPath.substringAfterLast('/'))
-                        val input = repository.openSyncInput(local)
-                            ?: throw IllegalStateException("Unable to read local file")
-                        input.use { api.replace(remote.id, local.document.mimeType ?: "application/octet-stream", it) }
-                        conflicts++
                     }
                 }
             } catch (failure: Exception) {
@@ -90,8 +151,20 @@ class GoogleDriveSyncService(
             report(completed, total, "已比较 $completed / $total")
         }
 
+        moveChanges.forEach { change ->
+            if (cancelled.get()) return result(uploaded, downloaded, unchanged, conflicts, errors, true)
+            try {
+                if (applyCommittedMove(change, allMoveMappings, baseline, root, localFiles, remoteFolders) == MoveApplyResult.COMPLETED) {
+                    completedChangeIds += change.id
+                }
+            } catch (failure: Exception) {
+                errors += "本地搬运 ${change.id.take(8)}: ${userMessage(failure)}"
+            }
+        }
+
         remoteFiles.toSortedMap().forEach { (path, remote) ->
             if (localFiles.containsKey(path)) return@forEach
+            if (path in moveSources) return@forEach
             if (cancelled.get()) return result(uploaded, downloaded, unchanged, conflicts, errors, true)
             try {
                 report(completed, total, "正在下载 $path")
@@ -115,8 +188,84 @@ class GoogleDriveSyncService(
             completed++
             report(completed, total, "已比较 $completed / $total")
         }
-        return result(uploaded, downloaded, unchanged, conflicts, errors, false)
+        val outcome = result(uploaded, downloaded, unchanged, conflicts, errors, false)
+        if (outcome.isSuccessful && baselineStore != null) {
+            val baselineSaved = runCatching { saveBaseline(root) }.getOrDefault(false)
+            if (!baselineSaved) return DriveSyncResult(uploaded, downloaded, unchanged, conflicts, listOf("无法保存同步基线"), false)
+            completedChangeIds.forEach { id ->
+                if (changeStore?.acknowledge(id) != true) return DriveSyncResult(uploaded, downloaded, unchanged, conflicts, listOf("无法确认本地搬运历史"), false)
+            }
+        }
+        return outcome
     }
+
+    private fun saveBaseline(root: DriveVaultRoot): Boolean {
+        val local = repository.syncFilesStrict().associateBy { it.relativePath }
+        val remoteFiles = linkedMapOf<String, DriveItem>()
+        val folders = linkedMapOf("" to root.id)
+        scanRemote(root.id, "", remoteFiles, folders)
+        val files = buildMap {
+            local.forEach { (path, file) ->
+                val remote = remoteFiles[path] ?: return@forEach
+                val sha = sha256(repository.openSyncInput(file)) ?: return@forEach
+                put(path, DriveBaselineFile(path, sha, remote.id, remote.md5 ?: md5(api.download(remote)), remote.version))
+            }
+        }
+        return baselineStore?.save(DriveSyncBaseline(vaultId, root.id, accountId, files, System.currentTimeMillis())) ?: true
+    }
+
+    private fun applyCommittedMove(
+        change: MoveBundleChange,
+        allMappings: Map<String, String>,
+        baseline: Map<String, DriveBaselineFile>,
+        root: DriveVaultRoot,
+        localFiles: Map<String, VaultSyncFile>,
+        folders: MutableMap<String, String>
+    ): MoveApplyResult {
+        val refreshedFiles = linkedMapOf<String, DriveItem>()
+        val refreshedFolders = linkedMapOf("" to root.id)
+        scanRemote(root.id, "", refreshedFiles, refreshedFolders)
+        folders.putAll(refreshedFolders)
+        fun finalTarget(path: String): String {
+            var current = path
+            val seen = mutableSetOf<String>()
+            while (seen.add(current)) current = allMappings[current] ?: return current
+            throw IllegalStateException("Move history contains a cycle")
+        }
+        change.sourceToTarget.values.map(::finalTarget).distinct().forEach { target ->
+            val local = localFiles[target] ?: throw IllegalStateException("Move target is missing locally")
+            val remote = refreshedFiles[target] ?: throw IllegalStateException("Move target was not uploaded")
+            val localHash = md5(repository.openSyncInput(local)) ?: throw IllegalStateException("Move target is unreadable")
+            val remoteHash = remote.md5 ?: md5(api.download(remote))
+            if (!localHash.equals(remoteHash, true)) throw IllegalStateException("Move target verification failed")
+        }
+        change.sourceToTarget.keys.forEach { source ->
+            val remote = refreshedFiles[source] ?: return@forEach
+            val actual = remote.md5 ?: md5(api.download(remote))
+            val base = baseline[source]
+            if (base == null) return MoveApplyResult.DEFERRED
+            val baselineMatches = base.remoteId == remote.id &&
+                base.remoteMd5.equals(actual, true) && (base.remoteVersion == null || base.remoteVersion == remote.version)
+            if (!baselineMatches) {
+                val conflict = conflictPath(source, "Google Drive", change.id.take(8))
+                val parent = ensureRemoteFolder(conflict.substringBeforeLast('/', ""), folders)
+                if (refreshedFiles[conflict] == null) api.copy(remote.id, parent, conflict.substringAfterLast('/'))
+                throw IllegalStateException("Move source changed remotely or has no successful baseline")
+            }
+            val revision = api.revision(remote.id)
+            val current = revision.item
+            val currentHash = current.md5 ?: md5(api.download(current))
+            if (current.version != remote.version || !currentHash.equals(actual, true)) throw IllegalStateException("Google Drive source changed during sync")
+            api.trash(remote.id, revision.etag)
+        }
+        val afterFiles = linkedMapOf<String, DriveItem>()
+        val afterFolders = linkedMapOf("" to root.id)
+        scanRemote(root.id, "", afterFiles, afterFolders)
+        if (change.sourceToTarget.keys.any(afterFiles::containsKey)) throw IllegalStateException("Old Drive paths are still present")
+        return MoveApplyResult.COMPLETED
+    }
+
+    private enum class MoveApplyResult { COMPLETED, DEFERRED }
 
     private fun scanRemote(
         parentId: String,
@@ -167,6 +316,20 @@ class GoogleDriveSyncService(
         if (input == null) return null
         return input.use {
             val digest = MessageDigest.getInstance("MD5")
+            val buffer = ByteArray(32 * 1024)
+            while (true) {
+                val count = it.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+            digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }
+    }
+
+    private fun sha256(input: InputStream?): String? {
+        if (input == null) return null
+        return input.use {
+            val digest = MessageDigest.getInstance("SHA-256")
             val buffer = ByteArray(32 * 1024)
             while (true) {
                 val count = it.read(buffer)

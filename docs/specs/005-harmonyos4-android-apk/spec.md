@@ -4,7 +4,7 @@
 **Priority**: P1
 **Depends on**: 001-local-markdown-notebook, 002-camera-attachments,
 004-harmony-4-5-compatibility
-**Current Baseline**: Android APK `0.3.0` development (`versionCode 6`)
+**Current Baseline**: Android APK `0.4.0` development (`versionCode 7`)
 
 ## Goal
 
@@ -98,6 +98,7 @@ Mate 60 真机验收前，该版本不得标记为正式发布。
 - **FR-523** Android 文件库、设置与编辑器须使用一致的日间/夜间语义化视觉令牌；文件库以连续分组和原生图标表达目录、笔记与导航，编辑器以紧凑元数据保留完整上下文与持续保存状态。首次出现可管理条目时显示一次可关闭、可访问的左滑操作提示；Markdown 视觉增强不得改变编辑或序列化语义。
 - **FR-524** Android 文件库必须提供只读 Vault 搜索：递归匹配普通 `.md` 笔记的文件名、正文与标签，显示确定排序的结果摘要、父目录、每日状态和可用修改时间；搜索不写入 Vault 或建立数据库，且保留搜索/文件库上下文。编辑器格式工具须显示标题、加粗、斜体与撤销/重做的可用或选中状态。
 - **FR-525** Android 设置中的“回收站”必须打开 Vault 根 `.trash/` 的直接项目浏览页；Markdown 以独立只读查看器打开。单项永久删除和清空均在确认后按直接子项快照执行，文件夹只允许 Provider 整体删除，附件保留且删除失败不移除源项目。
+- **FR-526** Android 文件库的普通笔记长按菜单必须提供“移动到…”。它以纯本地 marker 事务移动笔记和独占附件 bundle、重写本地链接并记录 provider-neutral `MoveBundle` 变化，不读取 Drive 配置。下一轮同步用变化历史和基线更新 Drive；仅运行中的同 Vault 同步拒绝结构移动，引用扫描、冲突和恢复必须保守。
 
 ## Out of Scope
 

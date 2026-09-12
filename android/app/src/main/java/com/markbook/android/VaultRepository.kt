@@ -14,6 +14,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import java.security.SecureRandom
+import java.security.MessageDigest
 
 data class VaultDocument(
     val uri: Uri,
@@ -193,6 +194,20 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         return listChildren(tree, directory.uri, directory.relativePath)
     }
 
+    /** All user-manageable directories, for a same-Vault note-move destination picker. */
+    fun directories(): List<VaultDocument> {
+        val tree = savedVaultUri() ?: return emptyList()
+        val root = vaultRoot() ?: return emptyList()
+        fun descend(directory: VaultDocument): List<VaultDocument> = buildList {
+            add(directory)
+            listChildrenStrict(tree, directory.uri, directory.relativePath)
+                .filter { isDirectory(it) && !isInternalPath(it.relativePath) }
+                .sortedBy { it.relativePath.lowercase(Locale.ROOT) }
+                .forEach { addAll(descend(it)) }
+        }
+        return try { descend(root) } catch (_: Exception) { emptyList() }
+    }
+
     fun searchNotes(query: String, shouldContinue: () -> Boolean = { true }): VaultSearchResult {
         val tree = savedVaultUri() ?: return VaultSearchResult.Failure(VaultFailureKind.PERMISSION_DENIED)
         val root = vaultRoot() ?: return VaultSearchResult.Failure(VaultFailureKind.PERMISSION_DENIED)
@@ -366,6 +381,8 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
                 ?: return VaultRecoveryResult.Failure(VaultFailureKind.PERMISSION_DENIED)
             recoverVaultDirectory(tree, rootDocument(tree), "")
             recoverPendingVideoCapture(tree)
+            recoverPreparedLocalChanges(tree)
+            if (!recoverNoteBundleMoves(tree) || hasUnresolvedMoveTransactions()) return VaultRecoveryResult.Failure(VaultFailureKind.READ_FAILED)
             VaultRecoveryResult.Success
         } catch (_: SecurityException) {
             VaultRecoveryResult.Failure(VaultFailureKind.PERMISSION_DENIED)
@@ -505,6 +522,118 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         }
     }
 
+    /**
+     * Moves a Markdown note and its exclusive attachment bundle. This deliberately has no
+     * copy/delete fallback: a provider that cannot atomically move either object leaves the
+     * source available for a retry.
+     */
+    fun moveNoteWithAssets(document: VaultDocument, destination: VaultDocument): VaultMutationResult {
+        if (hasUnresolvedMoveTransactions()) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "存在尚未恢复的笔记移动")
+        if (!isManageable(document) || !document.name.endsWith(".md", true) || !isManageableParent(destination)) {
+            return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        }
+        if (document.parentUri == destination.uri) return VaultMutationResult.Failure(VaultMutationFailureKind.INVALID_NAME, "笔记已在这个目录")
+        val sourceParent = document.parentUri ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        return try {
+            val tree = savedVaultUri() ?: return VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
+            val resolvedSource = findByRelativePath(tree, document.relativePath)
+            val resolvedDestination = if (destination.relativePath.isBlank()) vaultRoot() else findByRelativePath(tree, destination.relativePath)
+            if (resolvedSource?.uri != document.uri || resolvedDestination == null ||
+                resolvedDestination.uri != destination.uri || !isDirectory(resolvedDestination)) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "源和目标必须属于当前 Vault")
+            }
+            val noteName = VaultNamePolicy.validate(document.name, VaultEntryKind.NOTE) as? VaultNameValidation.Valid
+                ?: return VaultMutationResult.Failure(VaultMutationFailureKind.INVALID_NAME)
+            if (VaultNamePolicy.conflicts(noteName, listChildrenStrict(tree, destination.uri, destination.relativePath).map { it.name })) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.NAME_CONFLICT, "目标目录已有同名笔记或文件夹")
+            }
+            val bundleCandidates = listOf(NoteBundleMovePolicy.bundlePath(document.relativePath), NoteBundleMovePolicy.legacyBundlePath(document.relativePath))
+                .distinct().filter { findByRelativePath(tree, it)?.let(::isDirectory) == true }
+            if (bundleCandidates.size > 1) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "检测到多个同名附件目录，无法判断归属")
+            val sourceBundlePath = bundleCandidates.singleOrNull()
+            val sourceBundle = sourceBundlePath?.let { findByRelativePath(tree, it) }
+            val markdown = readText(document) ?: return VaultMutationResult.Failure(VaultMutationFailureKind.READ_FAILED, "无法读取要移动的笔记")
+            if (markdownReferencesBundle(tree, document, sourceBundlePath ?: "")) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "附件被其他笔记使用，无法安全移动")
+            }
+            val targetPath = joinRelativePath(destination.relativePath, document.name)
+            val targetBundlePath = NoteBundleMovePolicy.bundlePath(targetPath)
+            if (sourceBundle != null && findByRelativePath(tree, targetBundlePath) != null) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.NAME_CONFLICT, "目标目录已有同名附件")
+            }
+            val rewritten = if (sourceBundlePath == null) markdown else try {
+                NoteBundleMovePolicy.rewriteBundleReferences(markdown, document.parentRelativePath, destination.relativePath, sourceBundlePath, targetBundlePath)
+            } catch (_: IllegalArgumentException) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "附件链接无法安全重写")
+            }
+            val changeId = UUID.randomUUID().toString()
+            val change = buildMoveChange(tree, changeId, document, sourceBundle, sourceBundlePath, targetPath, targetBundlePath, markdown, rewritten)
+                ?: return VaultMutationResult.Failure(VaultMutationFailureKind.READ_FAILED, "无法读取附件清单")
+            val marker = createMoveMarker(tree, NoteBundleMoveTransaction(
+                changeId, document.relativePath, targetPath, sourceBundlePath ?: "", targetBundlePath,
+                sha256(markdown), sha256(rewritten), NoteBundleMoveTransaction.Stage.PREPARED
+            )) ?: run {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.CREATE_FAILED, "无法创建恢复标记")
+            }
+            val journal = LocalChangeJournal(context)
+            if (!journal.prepare(change)) {
+                runCatching { DocumentsContract.deleteDocument(resolver, marker.uri) }
+                return VaultMutationResult.Failure(VaultMutationFailureKind.CREATE_FAILED, "无法记录本地移动历史")
+            }
+            if (sha256(readText(document) ?: "") != sha256(markdown) ||
+                markdownReferencesBundle(tree, document, sourceBundlePath ?: "")) {
+                abortPreparedMove(marker, changeId)
+                return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "Vault 在移动前发生变化，请重试")
+            }
+            if (sourceBundle != null) {
+                val targetAssetsPath = joinRelativePath(destination.relativePath, "assets")
+                val targetAssets = findOrCreateDirectory(
+                    tree, destination.relativePath.split('/').filter { it.isNotBlank() } + "assets"
+                ) ?: return VaultMutationResult.Failure(VaultMutationFailureKind.CREATE_FAILED)
+                val targetAssetsDocument = findByRelativePath(tree, targetAssetsPath)
+                if (targetAssetsDocument == null || targetAssetsDocument.uri != targetAssets ||
+                    targetAssetsDocument.name != "assets" || !isDirectory(targetAssetsDocument)) {
+                    return VaultMutationResult.Failure(VaultMutationFailureKind.NAME_CONFLICT, "目标 assets 目录名称不确定")
+                }
+                val bundleParent = sourceBundle.parentUri
+                    ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+                if (!updateMoveMarker(marker, NoteBundleMoveTransaction.Stage.BUNDLE_INTENT)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "无法更新恢复标记")
+                val movedBundle = DocumentsContract.moveDocument(resolver, sourceBundle.uri, bundleParent, targetAssets)
+                if (movedBundle == null) {
+                    return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "无法移动附件目录，源内容未改动")
+                }
+                val resolvedBundle = resolveMutationDocument(targetAssets, targetAssetsPath, movedBundle)
+                if (resolvedBundle?.name != sourceBundle.name || resolvedBundle.relativePath != targetBundlePath) {
+                    return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "Provider 更改了附件目录名称，已保留恢复标记")
+                }
+                if (!updateMoveMarker(marker, NoteBundleMoveTransaction.Stage.BUNDLE_AT_TARGET)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "附件已移动，恢复标记写入失败")
+            }
+            if (!updateMoveMarker(marker, NoteBundleMoveTransaction.Stage.NOTE_INTENT)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "无法更新恢复标记")
+            val moved = DocumentsContract.moveDocument(resolver, document.uri, sourceParent, destination.uri)
+                ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "笔记移动结果不确定，正在保留数据以便恢复")
+            val movedDocument = resolveMutationDocument(destination.uri, destination.relativePath, moved)
+                ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "无法确认移动后的笔记")
+            if (movedDocument.name != document.name || movedDocument.relativePath != targetPath) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "Provider 更改了笔记名称，已保留恢复标记")
+            }
+            if (!updateMoveMarker(marker, NoteBundleMoveTransaction.Stage.NOTE_AT_TARGET)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "笔记已移动，恢复标记写入失败")
+            if (sha256(readText(movedDocument) ?: "") != sha256(markdown)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "笔记已被外部修改，已保留恢复标记")
+            if (!updateMoveMarker(marker, NoteBundleMoveTransaction.Stage.REWRITE_INTENT)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "无法更新恢复标记")
+            if (!saveText(movedDocument, rewritten)) {
+                return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "附件已移动，但无法更新笔记链接；请勿清理数据并重试")
+            }
+            if (!updateMoveMarker(marker, NoteBundleMoveTransaction.Stage.REWRITTEN)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "笔记已更新，恢复标记写入失败")
+            if (!verifyMoveTargets(tree, changeId)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "移动结果验证失败，已保留恢复标记")
+            if (!journal.commit(changeId)) return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "本地移动完成，但变化历史尚未确认")
+            DocumentsContract.deleteDocument(resolver, marker.uri)
+            VaultMutationResult.Success(refreshDocument(movedDocument), document.name, document.name)
+        } catch (_: SecurityException) {
+            VaultMutationResult.Failure(VaultMutationFailureKind.PERMISSION_DENIED)
+        } catch (_: Exception) {
+            VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED)
+        }
+    }
+
     fun trashContents(): TrashContentsResult {
         return try {
             val tree = savedVaultUri()
@@ -561,15 +690,15 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
     private fun trashContentsCount(): Int = (trashDocuments() as? TrashDocumentsResult.Success)?.documents?.size ?: 0
 
     fun savePhotoPair(
-        noteName: String,
+        note: VaultDocument,
         original: InputStream,
         corrected: ByteArray,
         extension: String = "jpg"
     ): PhotoAttachments? {
         val tree = savedVaultUri() ?: return null
-        val noteFolder = assetFolderName(noteName)
-        val relativeDirectory = "assets/$noteFolder"
-        val directory = findOrCreateDirectory(tree, listOf("assets", noteFolder)) ?: return null
+        val attachmentDirectory = attachmentDirectory(tree, note) ?: return null
+        val relativeDirectory = attachmentDirectory.first
+        val directory = attachmentDirectory.second
         val id = nextCaptureId(tree, directory) ?: return null
         val originalName = "$id-o.$extension"
         val correctedName = "$id-c.$extension"
@@ -633,16 +762,16 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
 
     /** Writes one original system-camera video under an attachment marker. Cache ownership remains with caller. */
     fun saveVideoAttachment(
-        noteName: String,
+        note: VaultDocument,
         cacheFile: File,
         extension: String,
         onProgress: (copiedBytes: Long) -> Boolean
     ): VideoAttachment? {
         if (!cacheFile.isFile || cacheFile.length() <= 0L) return null
         val tree = savedVaultUri() ?: return null
-        val noteFolder = assetFolderName(noteName)
-        val relativeDirectory = "assets/$noteFolder"
-        val directory = findOrCreateDirectory(tree, listOf("assets", noteFolder)) ?: return null
+        val attachmentDirectory = attachmentDirectory(tree, note) ?: return null
+        val relativeDirectory = attachmentDirectory.first
+        val directory = attachmentDirectory.second
         val id = nextCaptureId(tree, directory) ?: return null
         val name = "$id-v.$extension"
         val marker = DocumentsContract.createDocument(resolver, directory, "text/plain", ".markbook-$id.txn") ?: return null
@@ -793,14 +922,29 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         }
     }
 
+    /** Strict scan for plans that may create remote recycle-bin operations. */
+    fun syncFilesStrict(): List<VaultSyncFile> {
+        val tree = savedVaultUri() ?: throw SecurityException("Vault permission unavailable")
+        return scanSyncDirectory(tree, rootDocument(tree))
+    }
+
     fun openSyncInput(file: VaultSyncFile): InputStream? = try {
         resolver.openInputStream(file.document.uri)
     } catch (_: Exception) {
         null
     }
 
+    /** Rechecks the current file immediately before a sync applies a remote replacement. */
+    fun syncMd5(relativePath: String): String? {
+        return try {
+            val tree = savedVaultUri() ?: return null
+            val document = findByRelativePath(tree, relativePath) ?: return null
+            resolver.openInputStream(document.uri)?.use(::md5)
+        } catch (_: Exception) { null }
+    }
+
     /** Writes a downloaded file with the same recoverable replace protocol as note saving. */
-    fun writeSyncFile(relativePath: String, mimeType: String?, input: InputStream): Boolean {
+    fun writeSyncFile(relativePath: String, mimeType: String?, input: InputStream, expectedCurrentMd5: String? = null): Boolean {
         val cleanPath = safeSyncPath(relativePath) ?: return false
         val tree = savedVaultUri() ?: return false
         val parts = cleanPath.split('/')
@@ -817,6 +961,10 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
             resolver.openOutputStream(temp, "wt")?.use { output -> copyStream(input, output) }
                 ?: throw IllegalStateException("Unable to write downloaded file")
             val existing = findChild(tree, parent, name)
+            if (expectedCurrentMd5 != null) {
+                val current = existing?.let { resolver.openInputStream(it.uri)?.use(::md5) }
+                if (!expectedCurrentMd5.equals(current, true)) throw IllegalStateException("Local file changed during sync")
+            }
             if (existing != null) {
                 backup = DocumentsContract.renameDocument(
                     resolver,
@@ -888,7 +1036,7 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
 
     private fun scanSyncDirectory(tree: Uri, directory: Uri, prefix: String = ""): List<VaultSyncFile> {
         return buildList {
-            listChildren(tree, directory).forEach { child ->
+            listChildrenStrict(tree, directory, prefix).forEach { child ->
                 val path = listOf(prefix, child.name).filter { it.isNotEmpty() }.joinToString("/")
                 if (!syncPathAllowed(path, child.mimeType == DocumentsContract.Document.MIME_TYPE_DIR)) return@forEach
                 if (child.mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
@@ -899,6 +1047,197 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
             }
         }
     }
+
+    /** A bundle cannot move unless every user Markdown file is readable and no peer references it. */
+    private fun markdownReferencesBundle(tree: Uri, moving: VaultDocument, bundlePath: String): Boolean {
+        fun scan(directory: VaultDocument): Boolean {
+            listChildrenStrict(tree, directory.uri, directory.relativePath).forEach { child ->
+                if (isInternalPath(child.relativePath)) return@forEach
+                if (isDirectory(child)) {
+                    if (scan(child)) return true
+                } else if (child.name.endsWith(".md", true)) {
+                    val content = readText(child) ?: return true // unreadable is conservatively unsafe
+                    if (child.uri != moving.uri && NoteBundleMovePolicy.isBundleReference(content, child.parentRelativePath, bundlePath)) return true
+                }
+            }
+            return false
+        }
+        return scan(VaultDocument(rootDocument(tree), "Vault", DocumentsContract.Document.MIME_TYPE_DIR))
+    }
+
+    private fun createMoveMarker(tree: Uri, transaction: NoteBundleMoveTransaction): VaultDocument? {
+        val directory = findOrCreateDirectory(tree, listOf(".markbook", "moves")) ?: return null
+        val name = ".markbook-note-move-${transaction.id}.txn"
+        val uri = DocumentsContract.createDocument(resolver, directory, "text/plain", name) ?: return null
+        val marker = resolveMutationDocument(directory, ".markbook/moves", uri) ?: return null
+        return if (writeMoveMarker(marker, transaction)) marker else null
+    }
+
+    fun hasUnresolvedMoveTransactions(): Boolean {
+        val tree = savedVaultUri() ?: return true
+        if (LocalChangeJournal(context).changes(tree.toString())?.any { it.state == LocalChangeState.PREPARED } != false) return true
+        val moves = findByRelativePath(tree, ".markbook/moves") ?: return false
+        return try { listChildrenStrict(tree, moves.uri, ".markbook/moves").isNotEmpty() } catch (_: Exception) { true }
+    }
+
+    private fun abortPreparedMove(marker: VaultDocument, changeId: String) {
+        if (LocalChangeJournal(context).acknowledge(changeId)) runCatching { DocumentsContract.deleteDocument(resolver, marker.uri) }
+    }
+
+    private fun recoverPreparedLocalChanges(tree: Uri) {
+        val journal = LocalChangeJournal(context)
+        journal.changes(tree.toString())?.filter { it.state == LocalChangeState.PREPARED }?.forEach { change ->
+            val sourcePresent = change.sourceToTarget.keys.all { findByRelativePath(tree, it) != null }
+            val targetAbsent = change.sourceToTarget.values.all { findByRelativePath(tree, it) == null }
+            if (sourcePresent && targetAbsent) journal.acknowledge(change.id)
+        }
+    }
+
+    private fun buildMoveChange(
+        tree: Uri,
+        id: String,
+        note: VaultDocument,
+        bundle: VaultDocument?,
+        sourceBundlePath: String?,
+        targetNotePath: String,
+        targetBundlePath: String,
+        markdown: String,
+        rewritten: String
+    ): MoveBundleChange? {
+        val mapping = linkedMapOf(note.relativePath to targetNotePath)
+        val bundleMapping = if (bundle != null && sourceBundlePath != null) mapOf(sourceBundlePath to targetBundlePath) else emptyMap()
+        val before = linkedMapOf(note.relativePath to sha256(markdown.toByteArray(StandardCharsets.UTF_8)))
+        val after = linkedMapOf(targetNotePath to sha256(rewritten.toByteArray(StandardCharsets.UTF_8)))
+        fun scan(directory: VaultDocument, sourcePrefix: String, targetPrefix: String): Boolean {
+            val children = try { listChildrenStrict(tree, directory.uri, directory.relativePath) } catch (_: Exception) { return false }
+            children.forEach { child ->
+                val suffix = child.relativePath.removePrefix(sourcePrefix).removePrefix("/")
+                val targetPath = joinRelativePath(targetPrefix, suffix)
+                if (isDirectory(child)) {
+                    if (!scan(child, sourcePrefix, targetPrefix)) return false
+                } else {
+                    val digest = resolver.openInputStream(child.uri)?.use(::sha256) ?: return false
+                    mapping[child.relativePath] = targetPath
+                    before[child.relativePath] = digest
+                    after[targetPath] = digest
+                }
+            }
+            return true
+        }
+        if (bundle != null && sourceBundlePath != null && !scan(bundle, sourceBundlePath, targetBundlePath)) return null
+        return MoveBundleChange(id, tree.toString(), mapping, bundleMapping, before, after, LocalChangeState.PREPARED)
+    }
+
+    private fun md5(bytes: ByteArray): String = MessageDigest.getInstance("MD5")
+        .digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private fun md5(input: InputStream): String {
+        val digest = MessageDigest.getInstance("MD5")
+        val buffer = ByteArray(32 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) return digest.digest().joinToString("") { "%02x".format(it) }
+            digest.update(buffer, 0, count)
+        }
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private fun sha256(input: InputStream): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(32 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) return digest.digest().joinToString("") { "%02x".format(it) }
+            digest.update(buffer, 0, count)
+        }
+    }
+
+    /** Never guesses after an interrupted move: verified-complete markers are cleaned, all other
+     * states remain visible in the Vault for a later explicit recovery instead of deleting data. */
+    private fun recoverNoteBundleMoves(tree: Uri): Boolean {
+        val moves = findByRelativePath(tree, ".markbook/moves") ?: return true
+        var parseFailure = false
+        listChildrenStrict(tree, moves.uri, ".markbook/moves").forEach { marker ->
+            val transaction = readText(marker)?.let(NoteBundleMoveTransaction::parse)
+            if (transaction == null) {
+                parseFailure = true
+                return@forEach
+            }
+            val source = findByRelativePath(tree, transaction.sourceNote)
+            val target = findByRelativePath(tree, transaction.targetNote)
+            val sourceBundle = transaction.sourceBundle.takeIf { it.isNotBlank() }?.let { findByRelativePath(tree, it) }
+            val targetBundle = transaction.targetBundle.takeIf { it.isNotBlank() }?.let { findByRelativePath(tree, it) }
+            if (source == null && target != null && readText(target)?.let(::sha256) == transaction.rewrittenHash &&
+                (transaction.sourceBundle.isBlank() || targetBundle != null) && verifyMoveTargets(tree, transaction.id)) {
+                if (LocalChangeJournal(context).commit(transaction.id)) runCatching { DocumentsContract.deleteDocument(resolver, marker.uri) }
+                return@forEach
+            }
+            if (target == null && targetBundle == null &&
+                source != null && readText(source)?.let(::sha256) == transaction.sourceHash &&
+                (transaction.sourceBundle.isBlank() || sourceBundle != null)) {
+                val journal = LocalChangeJournal(context)
+                if (journal.changes(tree.toString())?.none { it.id == transaction.id } == true || journal.acknowledge(transaction.id)) {
+                    runCatching { DocumentsContract.deleteDocument(resolver, marker.uri) }
+                }
+                return@forEach
+            }
+            // Bundle moved but note did not: verified rollback restores the original readable state.
+            if (source != null && readText(source)?.let(::sha256) == transaction.sourceHash &&
+                sourceBundle == null && targetBundle != null && transaction.sourceBundle.isNotBlank()) {
+                val originalParent = findByRelativePath(tree, transaction.sourceBundle.substringBeforeLast('/'))
+                if (originalParent != null && DocumentsContract.moveDocument(resolver, targetBundle.uri,
+                        targetBundle.parentUri ?: return@forEach, originalParent.uri) != null) {
+                    if (LocalChangeJournal(context).acknowledge(transaction.id)) runCatching { DocumentsContract.deleteDocument(resolver, marker.uri) }
+                }
+                return@forEach
+            }
+            // Note and bundle are at target but old Markdown remains: verified completion is safe.
+            if (source == null && target != null && (transaction.sourceBundle.isBlank() || targetBundle != null) &&
+                readText(target)?.let(::sha256) == transaction.sourceHash) {
+                val rewritten = runCatching {
+                    NoteBundleMovePolicy.rewriteBundleReferences(
+                        readText(target) ?: return@forEach,
+                        transaction.sourceNote.substringBeforeLast('/', ""),
+                        transaction.targetNote.substringBeforeLast('/', ""),
+                        transaction.sourceBundle, transaction.targetBundle
+                    )
+                }.getOrNull() ?: return@forEach
+                if (sha256(rewritten) == transaction.rewrittenHash && saveText(target, rewritten)) {
+                    if (verifyMoveTargets(tree, transaction.id) && LocalChangeJournal(context).commit(transaction.id)) {
+                        runCatching { DocumentsContract.deleteDocument(resolver, marker.uri) }
+                    }
+                }
+            }
+        }
+        return !parseFailure
+    }
+
+    private fun updateMoveMarker(marker: VaultDocument, stage: NoteBundleMoveTransaction.Stage): Boolean {
+        val current = readText(marker)?.let(NoteBundleMoveTransaction::parse) ?: return false
+        return writeMoveMarker(marker, current.withStage(stage))
+    }
+
+    private fun verifyMoveTargets(tree: Uri, changeId: String): Boolean {
+        val change = LocalChangeJournal(context).changes(tree.toString())?.firstOrNull { it.id == changeId } ?: return false
+        if (change.sourceToTarget.keys.any { findByRelativePath(tree, it) != null }) return false
+        if (change.bundleSourceToTarget.any { (source, target) -> findByRelativePath(tree, source) != null || findByRelativePath(tree, target) == null }) return false
+        return change.afterSha256.all { (path, expected) ->
+            val document = findByRelativePath(tree, path) ?: return@all false
+            val actual = resolver.openInputStream(document.uri)?.use(::sha256) ?: return@all false
+            actual.equals(expected, true)
+        }
+    }
+
+    private fun writeMoveMarker(marker: VaultDocument, transaction: NoteBundleMoveTransaction): Boolean = try {
+        resolver.openOutputStream(marker.uri, "wt")?.use { output ->
+            output.write(transaction.serialize().toByteArray(StandardCharsets.UTF_8)); output.flush()
+        } != null
+    } catch (_: Exception) { false }
+
+    private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
     private fun syncPathAllowed(path: String, directory: Boolean): Boolean {
         return SyncPathPolicy.isAllowed(path, directory)
@@ -1182,7 +1521,7 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
     }
 
     private fun isAttachmentDirectory(relativeDirectory: String): Boolean =
-        relativeDirectory.substringBefore('/') in setOf("assets", "attachments")
+        relativeDirectory.split('/').any { it in setOf("assets", "attachments") }
 
     private fun attachmentReferenceState(tree: Uri, names: List<String>): AttachmentReferenceScan =
         directoryReferenceState(tree, rootDocument(tree), "", names)
@@ -1230,6 +1569,18 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         return cleaned.ifEmpty { "Untitled" }
     }
 
+    /** Prefer a moved note's co-located bundle; root bundles are legacy-compatible. */
+    private fun attachmentDirectory(tree: Uri, note: VaultDocument): Pair<String, Uri>? {
+        val stem = assetFolderName(note.name)
+        val current = NoteBundleMovePolicy.bundlePath(note.relativePath)
+        findByRelativePath(tree, current)?.takeIf(::isDirectory)?.let { return current to it.uri }
+        val legacy = "assets/$stem"
+        findByRelativePath(tree, legacy)?.takeIf(::isDirectory)?.let { return legacy to it.uri }
+        val parts = note.parentRelativePath.split('/').filter { it.isNotBlank() } + listOf("assets", stem)
+        val directory = findOrCreateDirectory(tree, parts) ?: return null
+        return current to directory
+    }
+
     private class VideoCopyCancelledException : Exception()
 
     companion object {
@@ -1253,7 +1604,7 @@ class VaultRepository(private val context: Context, private val fixedVaultUri: U
         private const val PHOTO_RANDOM_LENGTH = 4
         private const val PHOTO_RANDOM_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
         private const val DEFAULT_SYNC_BUFFER_BYTES = 32 * 1024
-        private val RECOVERY_EXCLUDED_DIRECTORIES = setOf(".obsidian", ".trash")
+        private val RECOVERY_EXCLUDED_DIRECTORIES = setOf(".obsidian", ".trash", ".markbook/moves")
         private val NOTE_SCAN_EXCLUDED_DIRECTORIES = setOf(
             ".obsidian", ".trash", ".markbook", "assets", "attachments"
         )

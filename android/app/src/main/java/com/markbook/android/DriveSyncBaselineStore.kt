@@ -1,0 +1,57 @@
+package com.markbook.android
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.Base64
+
+data class DriveBaselineFile(val path: String, val localSha256: String, val remoteId: String, val remoteMd5: String?, val remoteVersion: Long?)
+data class DriveSyncBaseline(val vaultId: String, val rootId: String, val accountId: String, val files: Map<String, DriveBaselineFile>, val completedAt: Long)
+
+sealed class DriveBaselineLoad {
+    object Missing : DriveBaselineLoad()
+    data class Present(val baseline: DriveSyncBaseline) : DriveBaselineLoad()
+    object Corrupt : DriveBaselineLoad()
+}
+
+interface DriveBaselineStore {
+    fun load(vaultId: String, rootId: String, accountId: String): DriveBaselineLoad
+    fun save(baseline: DriveSyncBaseline): Boolean
+}
+
+/** Per-Vault, per-Drive-root successful comparison state; never Vault content. */
+class LocalDriveSyncBaselineStore(context: Context) : DriveBaselineStore {
+    private val preferences = context.getSharedPreferences("markbook_drive_baselines", Context.MODE_PRIVATE)
+
+    override fun load(vaultId: String, rootId: String, accountId: String): DriveBaselineLoad {
+        val raw = preferences.getString(key(vaultId, rootId, accountId), null) ?: return DriveBaselineLoad.Missing
+        return runCatching {
+            val json = JSONObject(raw)
+            require(json.getInt("schema") == 2)
+            val files = json.getJSONArray("files")
+            val map = buildMap {
+                for (index in 0 until files.length()) {
+                    val item = files.getJSONObject(index)
+                    val path = item.getString("path")
+                    put(path, DriveBaselineFile(path, item.getString("localSha256"), item.getString("remoteId"),
+                        item.optString("remoteMd5").takeIf { it.isNotBlank() }, item.optLong("remoteVersion").takeIf { item.has("remoteVersion") }))
+                }
+            }
+            DriveBaselineLoad.Present(DriveSyncBaseline(json.getString("vaultId"), json.getString("rootId"), json.getString("accountId"), map, json.getLong("completedAt")))
+        }.getOrElse { DriveBaselineLoad.Corrupt }
+    }
+
+    override fun save(baseline: DriveSyncBaseline): Boolean {
+        val files = JSONArray()
+        baseline.files.values.sortedBy { it.path }.forEach { file ->
+            files.put(JSONObject().put("path", file.path).put("localSha256", file.localSha256).put("remoteId", file.remoteId)
+                .put("remoteMd5", file.remoteMd5).put("remoteVersion", file.remoteVersion))
+        }
+        val value = JSONObject().put("schema", 2).put("vaultId", baseline.vaultId).put("rootId", baseline.rootId).put("accountId", baseline.accountId)
+            .put("completedAt", baseline.completedAt).put("files", files)
+        return preferences.edit().putString(key(baseline.vaultId, baseline.rootId, baseline.accountId), value.toString()).commit()
+    }
+
+    private fun key(vaultId: String, rootId: String, accountId: String) = Base64.getUrlEncoder().withoutPadding()
+        .encodeToString("$vaultId\u0000$rootId\u0000$accountId".toByteArray(Charsets.UTF_8))
+}

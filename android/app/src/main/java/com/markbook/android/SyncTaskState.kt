@@ -30,7 +30,8 @@ data class SyncTaskSnapshot(
     val startedAt: Long,
     val finishedAt: Long,
     val summary: SyncTaskSummary = SyncTaskSummary(),
-    val errors: List<String> = emptyList()
+    val errors: List<String> = emptyList(),
+    val vaultId: String = ""
 ) {
     val isRunning: Boolean get() = status == SyncTaskStatus.RUNNING
 
@@ -51,7 +52,7 @@ class SyncTaskStateStore(context: Context) {
     fun snapshot(): SyncTaskSnapshot? = preferences.getString(SNAPSHOT_KEY, null)?.let(::decode)
 
     @Synchronized
-    fun begin(providerId: String, providerName: String, targetName: String): SyncTaskSnapshot? {
+    fun begin(providerId: String, providerName: String, targetName: String, vaultId: String = ""): SyncTaskSnapshot? {
         if (snapshot()?.isRunning == true) return null
         return SyncTaskSnapshot(
             providerId = providerId,
@@ -62,7 +63,8 @@ class SyncTaskStateStore(context: Context) {
             total = 0,
             message = "正在准备同步…",
             startedAt = System.currentTimeMillis(),
-            finishedAt = 0L
+            finishedAt = 0L,
+            vaultId = vaultId
         ).also(::save)
     }
 
@@ -126,6 +128,7 @@ class SyncTaskStateStore(context: Context) {
         put("unchanged", value.summary.unchanged)
         put("conflicts", value.summary.conflicts)
         put("errors", JSONArray(value.errors))
+        put("vaultId", value.vaultId)
     }
 
     private fun decode(raw: String): SyncTaskSnapshot? = try {
@@ -145,7 +148,8 @@ class SyncTaskStateStore(context: Context) {
                 value.optInt("uploaded"), value.optInt("downloaded"),
                 value.optInt("unchanged"), value.optInt("conflicts")
             ),
-            errors = List(errors.length()) { errors.optString(it) }.filter { it.isNotBlank() }
+            errors = List(errors.length()) { errors.optString(it) }.filter { it.isNotBlank() },
+            vaultId = value.optString("vaultId")
         )
     } catch (_: Exception) {
         null

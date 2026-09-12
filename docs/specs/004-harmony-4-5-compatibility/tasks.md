@@ -14,3 +14,4 @@ Android APK 实现由规格 `005` 跟踪，HarmonyOS 5/6 HAP 实现由规格 `00
 - [ ] T408 建立共享文件库管理 fixture，覆盖 Unicode/NFC/大小写名称冲突、`.md` 规范化、
   不支持的目录移动、深度附件路径和每日目录失效恢复。
 - [ ] T409 建立视频链接（含空格）、`-v` 命名、MP4/3GP 元数据及不可读 Markdown 时保守恢复的共享 fixture。
+- [ ] T410 建立嵌套 assets 和笔记 bundle 移动 fixture，并在 APK、HAP、Obsidian 中验证。

@@ -56,21 +56,32 @@ class BackgroundSyncService : Service() {
             stopSelf(startId)
             return
         }
+        val lease = VaultMutationLease.tryAcquire(vault.toString(), VaultMutationLease.Kind.SYNC)
+        if (lease == null) {
+            recordStartFailure("当前 Vault 正在移动文件，请完成后重试同步")
+            stopSelf(startId)
+            return
+        }
         val root = DriveVaultRoot(rootId, rootName)
-        val started = stateStore.begin(GOOGLE_DRIVE_PROVIDER, "Google Drive", root.name)
+        val started = stateStore.begin(GOOGLE_DRIVE_PROVIDER, "Google Drive", root.name, vault.toString())
         if (started == null) {
+            VaultMutationLease.release(lease)
             stateStore.snapshot()?.let(::showOngoingNotification)
             return
         }
         cancellation.set(false)
         showOngoingNotification(started)
         executor.execute {
-            val result = runGoogleDriveSync(root, vault)
-            val final = stateStore.finish(result) ?: return@execute
-            if (final.status == SyncTaskStatus.SUCCEEDED) DriveSyncPreferences(this).markSuccessful()
-            stopForeground(false)
-            showFinishedNotification(final)
-            stopSelf()
+            try {
+                val result = runGoogleDriveSync(root, vault)
+                val final = stateStore.finish(result) ?: return@execute
+                if (final.status == SyncTaskStatus.SUCCEEDED) DriveSyncPreferences(this).markSuccessful(vault.toString(), root.id, authAccountId())
+                stopForeground(false)
+                showFinishedNotification(final)
+                stopSelf()
+            } finally {
+                VaultMutationLease.release(lease)
+            }
         }
     }
 
@@ -83,6 +94,10 @@ class BackgroundSyncService : Service() {
             GoogleDriveSyncService(
                 VaultRepository(this, vault),
                 GoogleDriveApi(auth.accessToken(account)),
+                vault.toString(),
+                account.email.orEmpty(),
+                LocalChangeJournal(this),
+                LocalDriveSyncBaselineStore(this),
                 cancellation
             ) { progress ->
                 stateStore.updateProgress(progress)?.let(::showOngoingNotification)
@@ -91,6 +106,8 @@ class BackgroundSyncService : Service() {
     } catch (_: Exception) {
         DriveSyncResult(0, 0, 0, 0, listOf("无法连接 Google Drive，请检查网络或重新登录"), false)
     }
+
+    private fun authAccountId(): String = GoogleDriveAuth(this).currentAccount()?.email.orEmpty()
 
     private fun recordStartFailure(message: String) {
         val started = stateStore.begin(GOOGLE_DRIVE_PROVIDER, "Google Drive", "未选择远端 Vault") ?: return

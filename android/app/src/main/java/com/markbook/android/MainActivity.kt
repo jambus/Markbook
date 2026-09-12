@@ -240,7 +240,15 @@ class MainActivity : Activity() {
         }, matchWrap())
         setContentView(root)
         noteIoExecutor.execute {
-            val result = repository.recoverVault()
+            val vaultId = repository.savedVaultUri()?.toString().orEmpty()
+            val lease = VaultMutationLease.tryAcquire(vaultId, VaultMutationLease.Kind.STRUCTURAL)
+            val result = if (lease == null) {
+                VaultRecoveryResult.Failure(VaultFailureKind.READ_FAILED)
+            } else try {
+                repository.recoverVault()
+            } finally {
+                VaultMutationLease.release(lease)
+            }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when (result) {
@@ -610,13 +618,15 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(4), dp(16), dp(24))
         }
         sectionLabel(content, "同步")
-        val driveRoot = drivePreferences.root()
-        val syncSnapshot = SyncTaskStateStore(this).snapshot()
+        val vaultId = repository.savedVaultUri()?.toString().orEmpty()
+        val accountId = driveAuth.currentAccount()?.email.orEmpty()
+        val driveRoot = drivePreferences.root(vaultId, accountId)
+        val syncSnapshot = currentSyncSnapshot()
         val driveStatus = when {
             syncSnapshot?.isRunning == true -> "${driveRoot?.name ?: syncSnapshot.targetName} · ${syncSnapshot.statusLabel()}"
             driveRoot == null -> "未连接"
             !driveAuth.isAuthorized(driveAuth.currentAccount()) -> "需要重新登录 · ${driveRoot.name}"
-            drivePreferences.lastSuccessAt() > 0L -> "${driveRoot.name} · 上次同步 ${formatSyncTime(drivePreferences.lastSuccessAt())}"
+            drivePreferences.lastSuccessAt(vaultId, driveRoot.id, accountId) > 0L -> "${driveRoot.name} · 上次同步 ${formatSyncTime(drivePreferences.lastSuccessAt(vaultId, driveRoot.id, accountId))}"
             else -> "已选择 ${driveRoot.name}"
         }
         content.addView(settingsRow("Google Drive", driveStatus, false) { showDriveSetup() }, matchWrap())
@@ -884,7 +894,7 @@ class MainActivity : Activity() {
                 setTextColor(COLOR_SECONDARY_TEXT)
                 setPadding(dp(6), dp(2), dp(6), dp(14))
             }, matchWrap())
-            val selectedRoot = drivePreferences.root()
+            val selectedRoot = drivePreferences.root(repository.savedVaultUri()?.toString().orEmpty(), driveAuth.currentAccount()?.email.orEmpty())
             content.addView(settingsRow(
                 "Drive Vault",
                 selectedRoot?.name ?: "尚未选择远端文件夹",
@@ -893,7 +903,7 @@ class MainActivity : Activity() {
             if (selectedRoot == null) {
                 content.addView(action("选择 Drive Vault", true) { showDriveFolderPicker(true) }, matchWrap())
             } else {
-                val syncSnapshot = SyncTaskStateStore(this@MainActivity).snapshot()
+                val syncSnapshot = currentSyncSnapshot()
                 content.addView(TextView(this).apply {
                     text = "同步会比较 Markdown 和 assets；不会同步 .obsidian、.trash，也不会传播删除。"
                     textSize = 13f
@@ -1032,7 +1042,17 @@ class MainActivity : Activity() {
     }
 
     private fun confirmDriveFolder() {
-        drivePreferences.setRoot(driveFolderDirectory)
+        val accountId = driveAuth.currentAccount()?.email ?: return
+        val vaultId = repository.savedVaultUri()?.toString().orEmpty()
+        if (currentSyncSnapshot()?.isRunning == true) {
+            showDriveSetup("同步正在运行，完成后才能更换 Google Drive 目录。")
+            return
+        }
+        if (LocalChangeJournal(this).changes(vaultId)?.isNotEmpty() == true) {
+            showDriveSetup("存在尚未确认的本地搬运，请先完成或重试当前同步后再更换 Google Drive 目录。")
+            return
+        }
+        drivePreferences.setRoot(driveFolderDirectory, vaultId, accountId)
         showDriveSetup("已选择 ${driveFolderDirectory.name}。同步前仍会再次确认范围。")
     }
 
@@ -1154,7 +1174,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(20), dp(20), dp(24))
         }
-        val snapshot = SyncTaskStateStore(this).snapshot()
+        val snapshot = currentSyncSnapshot()
         if (snapshot == null) {
             content.addView(emptyState("尚无同步记录。开始 Google Drive 同步后，可在这里查看进度和结果。"), matchWrap())
             content.addView(action("返回设置", true) { showSettings() }, matchWrap().apply { topMargin = dp(16) })
@@ -1475,10 +1495,9 @@ class MainActivity : Activity() {
                         val generation = browserLoadGeneration
                         val requestedName = input.text.toString()
                         noteIoExecutor.execute {
-                            val result = if (kind == VaultEntryKind.NOTE) {
-                                repository.createNote(parent, requestedName)
-                            } else {
-                                repository.createFolder(parent, requestedName)
+                            val result = runStructuralMutation {
+                                if (kind == VaultEntryKind.NOTE) repository.createNote(parent, requestedName)
+                                else repository.createFolder(parent, requestedName)
                             }
                             runOnUiThread {
                                 if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
@@ -1513,12 +1532,93 @@ class MainActivity : Activity() {
     private fun showDocumentMenu(document: VaultDocument) {
         if (browserMutationPending) return
         browserMutationMessage = null
+        val note = !repository.isDirectory(document) && document.name.endsWith(".md", true)
+        val items = if (note) arrayOf("重命名", "移动到…", "移到回收站") else arrayOf("重命名", "移到回收站")
         dialogBuilder()
             .setTitle(document.name)
-            .setItems(arrayOf("重命名", "移到回收站")) { _, index ->
-                if (index == 0) showRenameDialog(document) else confirmMoveToTrash(document)
+            .setItems(items) { _, index ->
+                when {
+                    index == 0 -> showRenameDialog(document)
+                    note && index == 1 -> showMoveDestinationDialog(document)
+                    else -> confirmMoveToTrash(document)
+                }
             }
             .show()
+    }
+
+    private fun showMoveDestinationDialog(document: VaultDocument) {
+        val vaultId = repository.savedVaultUri()?.toString().orEmpty()
+        if (VaultMutationLease.isHeld(vaultId, VaultMutationLease.Kind.SYNC)) {
+            dialogBuilder().setTitle("暂不能移动")
+                .setMessage("当前 Vault 正在同步，完成后即可移动。")
+                .setPositiveButton("知道了", null).show()
+            return
+        }
+        val generation = browserLoadGeneration
+        noteIoExecutor.execute {
+            val directories = repository.directories().filter { it.uri != document.parentUri }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
+                if (directories.isEmpty()) { toast("没有可用的目标目录"); return@runOnUiThread }
+                val labels = directories.map { it.relativePath.ifBlank { "Vault 根目录" } }.toTypedArray()
+                dialogBuilder().setTitle("移动到…").setItems(labels) { _, index ->
+                    confirmMoveNoteWithAssets(document, directories[index])
+                }.show()
+            }
+        }
+    }
+
+    private fun currentSyncSnapshot(): SyncTaskSnapshot? {
+        val vaultId = repository.savedVaultUri()?.toString().orEmpty()
+        return SyncTaskStateStore(this).snapshot()?.takeIf { it.vaultId == vaultId }
+    }
+
+    private fun runStructuralMutation(block: () -> VaultMutationResult): VaultMutationResult {
+        if (repository.hasUnresolvedMoveTransactions()) {
+            return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "存在尚未恢复的笔记移动，请重启应用后重试")
+        }
+        val vaultId = repository.savedVaultUri()?.toString().orEmpty()
+        val lease = VaultMutationLease.tryAcquire(vaultId, VaultMutationLease.Kind.STRUCTURAL)
+            ?: return VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "当前 Vault 正在同步，请完成后重试")
+        return try { block() } finally { VaultMutationLease.release(lease) }
+    }
+
+    private fun confirmMoveNoteWithAssets(document: VaultDocument, destination: VaultDocument) {
+        val target = destination.relativePath.ifBlank { "Vault 根目录" }
+        dialogBuilder().setTitle("移动笔记及附件？")
+            .setMessage("将“${document.name.removeSuffix(".md")}”及其独占图片、视频等附件移到 $target，并更新该笔记的本地附件链接。其他笔记指向它的链接不会更新；若附件被其他笔记使用则不会移动。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("移动") { _, _ ->
+                val generation = browserLoadGeneration
+                browserMutationPending = true
+                val progress = dialogBuilder().setTitle("正在移动笔记及附件…")
+                    .setMessage("正在检查引用并更新 Vault；请勿重复操作。").create()
+                progress.setCancelable(false)
+                progress.show()
+                noteIoExecutor.execute {
+                    val vaultId = repository.savedVaultUri()?.toString().orEmpty()
+                    val lease = VaultMutationLease.tryAcquire(vaultId, VaultMutationLease.Kind.STRUCTURAL)
+                    val result = if (lease == null) {
+                        VaultMutationResult.Failure(VaultMutationFailureKind.MOVE_UNSUPPORTED, "当前 Vault 正在同步，请完成后重试")
+                    } else try {
+                        repository.moveNoteWithAssets(document, destination)
+                    } finally {
+                        VaultMutationLease.release(lease)
+                    }
+                    runOnUiThread {
+                        progress.dismiss()
+                        if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
+                        browserMutationPending = false
+                        when (result) {
+                            is VaultMutationResult.Success -> { toast("笔记及附件已移动到 $target"); showVaultBrowser() }
+                            is VaultMutationResult.Failure -> {
+                                browserMutationMessage = "移动未完成，已保留 Vault 内容。${mutationFailureMessage(result)}"
+                                showVaultBrowser()
+                            }
+                        }
+                    }
+                }
+            }.show()
     }
 
     private fun showRenameDialog(document: VaultDocument) {
@@ -1550,7 +1650,7 @@ class MainActivity : Activity() {
                         val generation = browserLoadGeneration
                         val requestedName = input.text.toString()
                         noteIoExecutor.execute {
-                            val result = repository.rename(document, requestedName)
+                            val result = runStructuralMutation { repository.rename(document, requestedName) }
                             runOnUiThread {
                                 if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
                                 browserMutationPending = false
@@ -1596,7 +1696,7 @@ class MainActivity : Activity() {
                 progress.setCanceledOnTouchOutside(false)
                 progress.show()
                 noteIoExecutor.execute {
-                    val result = repository.moveToTrash(document)
+                    val result = runStructuralMutation { repository.moveToTrash(document) }
                     runOnUiThread {
                         progress.dismiss()
                         if (isFinishing || isDestroyed || screen != Screen.BROWSER || browserLoadGeneration != generation) return@runOnUiThread
@@ -2254,7 +2354,7 @@ class MainActivity : Activity() {
         videoStatusView?.text = "正在复制视频…"
         repository.savePendingVideoCapture(session.copy(stage = VIDEO_STAGE_COPYING))
         noteIoExecutor.execute {
-            val attachment = repository.saveVideoAttachment(note.name, cache, extension) { copied ->
+            val attachment = repository.saveVideoAttachment(note, cache, extension) { copied ->
                 runOnUiThread { videoStatusView?.text = "正在复制视频… ${formatBytes(copied)}（取消可返回）" }
                 !videoCopyCancelled.get()
             }
@@ -2396,7 +2496,7 @@ class MainActivity : Activity() {
         }
         noteIoExecutor.execute {
             val attachments = try {
-                FileInputStream(capture).use { repository.savePhotoPair(note.name, it, corrected) }
+                FileInputStream(capture).use { repository.savePhotoPair(note, it, corrected) }
             } catch (_: Exception) {
                 null
             }

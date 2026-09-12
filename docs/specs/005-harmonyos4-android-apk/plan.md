@@ -3,7 +3,7 @@
 ## Technical Context
 
 - Kotlin Android 工程位于 `android/`，使用项目内 Gradle Wrapper。
-- 当前开发版本为 `versionName 0.3.0`、`versionCode 6`；后续候选版本按
+- 当前开发版本为 `versionName 0.4.0`、`versionCode 7`；后续候选版本按
   [`docs/RELEASE_NOTES.md`](../../RELEASE_NOTES.md) 的规则提升并记录。
 - 通过 Storage Access Framework 选择 Vault 并持久化目录 URI 权限。
 - 通过 Activity Result API 拉起系统相机并复制返回内容。
@@ -34,6 +34,7 @@
 15. 统一 Android 的深浅色视觉令牌与系统主题；将文件库改为带原生图标和分隔线的连续分组，收紧编辑器上下文/保存状态，并仅在呈现层增强 Markdown 阅读层级。为左滑操作补充一次性、可访问的行内发现提示。
 16. 增加无数据库、只读的 Vault 搜索与结果上下文恢复；补充笔记修改时间/每日标识和编辑格式状态，并保持既有保存、Markdown 与附件事务语义。
 17. 将设置中的回收站改为可浏览的根 `.trash/` 直接项目页面，提供只读 Markdown 查看、单项永久删除和快照式清空；保持附件保留、Provider 整体文件夹删除和失败恢复规则。
+18. 为普通笔记增加“移动到…”目标选择与纯本地笔记/附件 bundle 三对象事务；提交后记录平台无关移动变化。同步空闲时允许移动，运行中的同 Vault 同步通过原子租约拒绝结构变更。
 
 ## Constitution Check
 

@@ -18,9 +18,11 @@ source of truth; neither client creates a second Vault or a required database.
     └── conflicts/
 ```
 
-Notes are UTF-8 Markdown. New images are stored below `assets/` in a folder
-named from the Markdown filename without `.md`; a daily note `2026-07-30.md`
-therefore writes into `assets/2026-07-30/`. Links use POSIX relative paths such
+Notes are UTF-8 Markdown. New images are stored below the note parent in
+`assets/<note-file-stem>/`; a root daily note `2026-07-30.md` therefore writes
+into `assets/2026-07-30/`, while `Projects/2026-07-30.md` writes into
+`Projects/assets/2026-07-30/`. Existing root `assets/<stem>/` bundles remain
+readable. Links use POSIX relative paths such
 as `../assets/2026-07-30/143015-a3f9-c.jpg`. The corrected image is the default
 visible reference, while the original remains addressable using the same capture
 ID. New capture IDs use the local capture time plus a four-character lowercase
@@ -60,8 +62,19 @@ Deleting a note or folder means moving the one direct child as a whole to the
 Vault-root `.trash/`. A non-empty folder must use the provider's atomic
 `moveDocument` semantics; clients must not emulate unsupported moves with a
 recursive copy-and-delete. If the move fails or is unsupported, the source and
-its contents remain in place. Moving or renaming does not rewrite Markdown
-links and does not automatically delete attachments.
+its contents remain in place. Ordinary rename and move-to-trash do not rewrite
+Markdown links and do not automatically delete attachments. The explicit
+**Move note with assets** action is the exception: it moves `a.md` and its
+exclusive bundle from `<source>/a.md` + `<source>/assets/a/` (or the legacy
+Vault-root `assets/a/`) to `<destination>/a.md` + `<destination>/assets/a/`,
+then rewrites only that note's Vault-local relative links to the bundle. It
+never rewrites inbound links from other notes. Before moving, clients must read
+every Markdown file: if any is unreadable, or another note references any file
+in the bundle, the move fails without changing the Vault. Source and target
+note names, target `assets/` containers, and target bundles must not conflict
+or be merged. The target is a normal directory in the same Vault, not an
+internal directory. All bundle content moves together; subsequent captures use
+the moved note's new parent `assets/<stem>/` bundle.
 
 For a note whose parent relative path is `p`, a new attachment reference is the
 POSIX relative path from `p` to `assets/<note-stem>/...`; this applies equally
@@ -98,6 +111,16 @@ replays the insertion. A provider result that returns null or throws after final
 as unknown and keeps its marker. MP4/3GP acceptance requires a recognized container signature plus
 a video track; an output filename or Provider MIME alone is insufficient.
 
+A note-with-assets move is a three-object transaction (note, bundle and
+rewritten note text). Its marker under Vault `.markbook/` records source and
+target paths, source note SHA-256 and committed stage before the first move.
+The client verifies the hash before rewriting, uses only provider whole-folder
+moves for a non-empty bundle, verifies all target objects before deleting the
+marker, and retains the marker for a null or uncertain provider result. Startup
+recovery is idempotent: it completes or rolls back only verified states;
+otherwise it preserves both data and the marker. Recover incomplete attachment
+transactions before a move begins.
+
 Deletes move notes and folders into `.trash/`; this directory is excluded from remote sync.
 Permanent deletion is a separate explicit operation. Attachments are retained until a later
 explicit cleanup flow, because they may still be referenced by another note.
@@ -121,3 +144,16 @@ the next sync comparison picks up a later local save. If a remote-only file appe
 a sync is running, the provider must preserve the local file and report a conflict rather than
 replace it. At most one sync job may modify a Vault at a time. Interrupted jobs are reported as
 interrupted and require an explicit retry; they must never be presented as successful.
+Local note-with-assets moves are Vault transactions and never depend on remote
+configuration or network availability. After a committed move the client records
+a provider-neutral `MoveBundle` change containing only Vault identity, source and
+target paths, fingerprints and a stable change ID. A running sync and local
+structural mutations are mutually exclusive for the same Vault.
+
+The next sync compares the strict local snapshot, strict remote snapshot, last
+successful baseline and local change history. It uploads and verifies all new
+paths before moving unchanged old remote paths into the provider recycle bin.
+Source paths belonging to an unacknowledged move are not treated as ordinary
+remote-only downloads. Remote changes after the baseline are preserved as
+conflicts. Only a fully successful comparison commits a new baseline and
+acknowledges local changes. General deletes do not propagate through this move rule.

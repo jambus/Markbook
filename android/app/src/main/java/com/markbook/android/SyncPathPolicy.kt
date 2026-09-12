@@ -8,6 +8,6 @@ object SyncPathPolicy {
         if (parts.first() in setOf(".obsidian", ".trash", ".markbook", "attachments")) return false
         if (parts.any { it.startsWith(".markbook-") || it.endsWith(".tmp") || it.endsWith(".bak") || it.endsWith(".txn") }) return false
         if (directory) return true
-        return parts.first() == "assets" || parts.last().endsWith(".md", ignoreCase = true)
+        return parts.contains("assets") || parts.last().endsWith(".md", ignoreCase = true)
     }
 }

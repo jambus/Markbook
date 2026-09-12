@@ -13,14 +13,28 @@ data class DriveItem(
     val id: String,
     val name: String,
     val mimeType: String,
-    val md5: String? = null
+    val md5: String? = null,
+    val version: Long? = null
 )
+data class DriveRevision(val item: DriveItem, val etag: String?)
 
 class DriveApiException(message: String) : Exception(message)
 
 /** Narrow Drive REST adapter. It deliberately keeps credentials and network URLs out of logs. */
-class GoogleDriveApi(private val accessToken: String) {
-    fun listChildren(parentId: String): List<DriveItem> {
+interface DriveGateway {
+    fun listChildren(parentId: String): List<DriveItem>
+    fun createFolder(parentId: String, name: String): DriveItem
+    fun upload(parentId: String, name: String, mimeType: String, input: InputStream)
+    fun replace(id: String, expectedEtag: String?, mimeType: String, input: InputStream)
+    fun copy(id: String, parentId: String, name: String): DriveItem
+    fun trash(id: String, expectedEtag: String? = null)
+    fun refresh(id: String): DriveItem
+    fun revision(id: String): DriveRevision
+    fun download(item: DriveItem): InputStream
+}
+
+class GoogleDriveApi(private val accessToken: String) : DriveGateway {
+    override fun listChildren(parentId: String): List<DriveItem> {
         val result = mutableListOf<DriveItem>()
         var pageToken: String? = null
         do {
@@ -29,7 +43,7 @@ class GoogleDriveApi(private val accessToken: String) {
                 append("https://www.googleapis.com/drive/v3/files?q=")
                 append(encode(query))
                 append("&pageSize=1000&fields=")
-                append(encode("nextPageToken,files(id,name,mimeType,md5Checksum)"))
+                append(encode("nextPageToken,files(id,name,mimeType,md5Checksum,version)"))
                 pageToken?.let { append("&pageToken=").append(encode(it)) }
             }
             val response = request("GET", url)
@@ -40,7 +54,8 @@ class GoogleDriveApi(private val accessToken: String) {
                     value.getString("id"),
                     value.getString("name"),
                     value.getString("mimeType"),
-                    value.optString("md5Checksum").takeIf { it.isNotBlank() }
+                    value.optString("md5Checksum").takeIf { it.isNotBlank() },
+                    value.optLong("version").takeIf { value.has("version") }
                 )
             }
             pageToken = response.optString("nextPageToken").takeIf { it.isNotBlank() }
@@ -48,7 +63,7 @@ class GoogleDriveApi(private val accessToken: String) {
         return result
     }
 
-    fun createFolder(parentId: String, name: String): DriveItem {
+    override fun createFolder(parentId: String, name: String): DriveItem {
         val metadata = JSONObject().apply {
             put("name", name)
             put("mimeType", FOLDER_MIME_TYPE)
@@ -58,7 +73,7 @@ class GoogleDriveApi(private val accessToken: String) {
         return DriveItem(response.getString("id"), response.getString("name"), FOLDER_MIME_TYPE)
     }
 
-    fun upload(parentId: String, name: String, mimeType: String, input: InputStream) {
+    override fun upload(parentId: String, name: String, mimeType: String, input: InputStream) {
         val boundary = "markbook-${System.nanoTime()}"
         val url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
         withConnection("POST", url) { connection ->
@@ -80,11 +95,11 @@ class GoogleDriveApi(private val accessToken: String) {
         }
     }
 
-    fun replace(id: String, mimeType: String, input: InputStream) {
-        uploadMultipart("PATCH", "https://www.googleapis.com/upload/drive/v3/files/${encode(id)}?uploadType=multipart", null, mimeType, input)
+    override fun replace(id: String, expectedEtag: String?, mimeType: String, input: InputStream) {
+        uploadMultipart("PATCH", "https://www.googleapis.com/upload/drive/v3/files/${encode(id)}?uploadType=multipart", null, mimeType, input, expectedEtag)
     }
 
-    fun copy(id: String, parentId: String, name: String): DriveItem {
+    override fun copy(id: String, parentId: String, name: String): DriveItem {
         val metadata = JSONObject().apply {
             put("name", name)
             put("parents", JSONArray().put(parentId))
@@ -102,7 +117,23 @@ class GoogleDriveApi(private val accessToken: String) {
         )
     }
 
-    fun download(item: DriveItem): InputStream {
+    /** Recoverable removal used only by an explicit, verified note-bundle move. */
+    override fun trash(id: String, expectedEtag: String?) {
+        val metadata = JSONObject().put("trashed", true)
+        request("PATCH", "https://www.googleapis.com/drive/v3/files/${encode(id)}", metadata.toString(), expectedEtag)
+    }
+
+    override fun refresh(id: String): DriveItem {
+        return revision(id).item
+    }
+
+    override fun revision(id: String): DriveRevision {
+        val (value, etag) = requestWithEtag("GET", "https://www.googleapis.com/drive/v3/files/${encode(id)}?fields=id,name,mimeType,md5Checksum,version")
+        return DriveRevision(DriveItem(value.getString("id"), value.getString("name"), value.getString("mimeType"),
+            value.optString("md5Checksum").takeIf { it.isNotBlank() }, value.optLong("version").takeIf { value.has("version") }), etag)
+    }
+
+    override fun download(item: DriveItem): InputStream {
         val connection = open("GET", "https://www.googleapis.com/drive/v3/files/${encode(item.id)}?alt=media")
         try {
             requireSuccess(connection)
@@ -113,15 +144,19 @@ class GoogleDriveApi(private val accessToken: String) {
         }
     }
 
-    private fun request(method: String, url: String, body: String? = null): JSONObject =
+    private fun request(method: String, url: String, body: String? = null, expectedEtag: String? = null): JSONObject =
+        requestWithEtag(method, url, body, expectedEtag).first
+
+    private fun requestWithEtag(method: String, url: String, body: String? = null, expectedEtag: String? = null): Pair<JSONObject, String?> =
         withConnection(method, url) { connection ->
+            expectedEtag?.let { connection.setRequestProperty("If-Match", it) }
             if (body != null) {
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
             }
             requireSuccess(connection)
-            connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { JSONObject(it.readText()) }
+            connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { JSONObject(it.readText()) } to connection.getHeaderField("ETag")
         }
 
     private fun uploadMultipart(
@@ -129,11 +164,13 @@ class GoogleDriveApi(private val accessToken: String) {
         url: String,
         metadata: JSONObject?,
         mimeType: String,
-        input: InputStream
+        input: InputStream,
+        expectedEtag: String? = null
     ) {
         val boundary = "markbook-${System.nanoTime()}"
         withConnection(method, url) { connection ->
             connection.doOutput = true
+            expectedEtag?.let { connection.setRequestProperty("If-Match", it) }
             connection.setChunkedStreamingMode(32 * 1024)
             connection.setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
             connection.outputStream.use { output ->
